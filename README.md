@@ -17,4 +17,13 @@ A set of standard implementations of common algorithms for use with [rlgym-learn
 See the [RLGym website](https://rlgym.org/RLGym%20Learn/introduction/) for complete documentation and demonstration of functionality [COMING SOON]. For now, you can take a look at `quick_start_guide.py` and `speed_test.py` in the rlgym-learn repo to get a sense of what's going on.
 
 ## Credits
-The code in the util folder comes from rlgym-ppo, written by Matthew Allen.
+This code was separated out from rlgym-learn, which itself was created using rlgym-ppo as a base. The following files were largely written by Matthew Allen, the creator of rlgym-ppo:
+ppo/basic_critic.py
+ppo/continuous_actor.py
+ppo/critic.py
+ppo/discrete_actor.py
+ppo/multi_discrete_actor.py
+ppo/experience_buffer.py
+util/*
+
+In general his support for this project has allowed it to become what it is today.
