@@ -99,33 +99,14 @@ class NumpyExperienceBuffer(
 
         return trajectory_processor_data
 
-    def _get_agent_id_samples(self, indices):
-        return [self.agent_ids[index] for index in indices]
-
-    def _get_observation_samples(self, indices):
-        return self.observations[indices]
-
-    def _get_action_samples(self, indices):
-        return self.actions[indices]
-
-    def _get_log_prob_samples(self, indices_tensor):
-        return self.log_probs[indices_tensor]
-
-    def _get_value_samples(self, indices):
-        return self.values[indices]
-
-    def _get_advantage_samples(self, indices):
-        return self.values[indices]
-
     def _get_samples(self, indices):
-        indices_tensor = torch.tensor(indices)
         return (
-            self._get_agent_id_samples(indices),
-            self._get_observation_samples(indices),
-            self._get_action_samples(indices),
-            self._get_log_prob_samples(indices_tensor),
-            self._get_value_samples(indices),
-            self._get_advantage_samples(indices_tensor),
+            [self.agent_ids[index] for index in indices],
+            self.observations[indices],
+            self.actions[indices],
+            self.log_probs[indices],
+            self.values[indices],
+            self.advantages[indices],
         )
 
     def get_all_batches_shuffled(self, batch_size):
