@@ -8,6 +8,5 @@ pub mod ppo;
 fn rlgym_learn(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<ppo::gae_trajectory_processor::GAETrajectoryProcessor>()?;
     m.add_class::<ppo::gae_trajectory_processor::DerivedGAETrajectoryProcessorConfig>()?;
-
     Ok(())
 }

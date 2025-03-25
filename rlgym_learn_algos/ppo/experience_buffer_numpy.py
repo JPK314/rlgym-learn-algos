@@ -35,7 +35,7 @@ class NumpyExperienceBuffer(
         if t2_len > size:
             # t2 alone is larger than we want; copy the end
             # This clone is needed to avoid nesting views
-            t = t2[-size:].clone()
+            t = t2[-size:].copy()
 
         elif t2_len == size:
             # t2 is a perfect match; just use it directly
@@ -99,14 +99,33 @@ class NumpyExperienceBuffer(
 
         return trajectory_processor_data
 
+    def _get_agent_id_samples(self, indices):
+        return [self.agent_ids[index] for index in indices]
+
+    def _get_observation_samples(self, indices):
+        return self.observations[indices]
+
+    def _get_action_samples(self, indices):
+        return self.actions[indices]
+
+    def _get_log_prob_samples(self, indices_tensor):
+        return self.log_probs[indices_tensor]
+
+    def _get_value_samples(self, indices):
+        return self.values[indices]
+
+    def _get_advantage_samples(self, indices):
+        return self.values[indices]
+
     def _get_samples(self, indices):
+        indices_tensor = torch.tensor(indices)
         return (
-            [self.agent_ids[index] for index in indices],
-            self.observations[indices],
-            self.actions[indices],
-            self.log_probs[indices],
-            self.values[indices],
-            self.advantages[indices],
+            self._get_agent_id_samples(indices),
+            self._get_observation_samples(indices),
+            self._get_action_samples(indices),
+            self._get_log_prob_samples(indices_tensor),
+            self._get_value_samples(indices),
+            self._get_advantage_samples(indices_tensor),
         )
 
     def get_all_batches_shuffled(self, batch_size):
@@ -121,9 +140,13 @@ class NumpyExperienceBuffer(
         total_samples = self.values.shape[0]
         indices = self.rng.permutation(total_samples)
         start_idx = 0
+        batches = []
         while start_idx + batch_size <= total_samples:
-            yield self._get_samples(indices[start_idx : start_idx + batch_size])
+            batches.append(
+                self._get_samples(indices[start_idx : start_idx + batch_size])
+            )
             start_idx += batch_size
+        return batches
 
     def clear(self):
         """

@@ -205,18 +205,14 @@ class PPOLearner(
         """
 
         n_batches = 0
-        tot_clip = 0
-        tot_entropy = 0
-        tot_divergence = 0
-        tot_val_loss = 0
+        clip_fractions = []
+        entropies = []
+        divergences = []
+        val_losses = []
 
         # Save parameters before computing any updates.
-        actor_before = torch.nn.utils.parameters_to_vector(
-            self.actor.parameters()
-        ).cpu()
-        critic_before = torch.nn.utils.parameters_to_vector(
-            self.critic.parameters()
-        ).cpu()
+        actor_before = torch.nn.utils.parameters_to_vector(self.actor.parameters())
+        critic_before = torch.nn.utils.parameters_to_vector(self.critic.parameters())
 
         t1 = time.time()
         for epoch in range(self.config.n_epochs):
@@ -277,15 +273,10 @@ class PPOLearner(
                         kl = kl.mean().detach() * minibatch_ratio
 
                         # From the stable-baselines3 implementation of PPO.
-                        clip_fraction = (
-                            torch.mean(
-                                (torch.abs(ratio - 1) > self.config.clip_range).float()
-                            )
-                            .cpu()
-                            .item()
-                            * minibatch_ratio
-                        )
-                        tot_clip += clip_fraction
+                        clip_fraction = torch.mean(
+                            (torch.abs(ratio - 1) > self.config.clip_range).float()
+                        ).to(device="cpu", non_blocking=True)
+                        clip_fractions.append((clip_fraction, minibatch_ratio))
 
                     actor_loss = (
                         -torch.min(ratio * advantages, clipped * advantages).mean()
@@ -299,9 +290,13 @@ class PPOLearner(
                     ppo_loss.backward()
                     value_loss.backward()
 
-                    tot_val_loss += value_loss.cpu().detach().item()
-                    tot_divergence += kl.cpu().detach().item()
-                    tot_entropy += entropy.cpu().detach().item()
+                    val_losses.append(
+                        value_loss.to(device="cpu", non_blocking=True).detach()
+                    )
+                    divergences.append(kl.to(device="cpu", non_blocking=True).detach())
+                    entropies.append(
+                        entropy.to(device="cpu", non_blocking=True).detach()
+                    )
 
                 torch.nn.utils.clip_grad_norm_(self.critic.parameters(), max_norm=0.5)
                 torch.nn.utils.clip_grad_norm_(self.actor.parameters(), max_norm=0.5)
@@ -312,12 +307,20 @@ class PPOLearner(
                 n_batches += 1
 
         # Compute magnitude of updates made to the actor and critic.
-        actor_after = torch.nn.utils.parameters_to_vector(self.actor.parameters()).cpu()
-        critic_after = torch.nn.utils.parameters_to_vector(
-            self.critic.parameters()
-        ).cpu()
-        actor_update_magnitude = (actor_before - actor_after).norm().item()
-        critic_update_magnitude = (critic_before - critic_after).norm().item()
+        actor_after = torch.nn.utils.parameters_to_vector(self.actor.parameters())
+        critic_after = torch.nn.utils.parameters_to_vector(self.critic.parameters())
+        actor_update_magnitude = (actor_before - actor_after).norm().cpu().item()
+        critic_update_magnitude = (critic_before - critic_after).norm().cpu().item()
+
+        if self.config.device != "cpu":
+            torch.cuda.current_stream().synchronize()
+
+        tot_clip = sum(
+            v.item() * minibatch_ratio for (v, minibatch_ratio) in clip_fractions
+        )
+        tot_entropy = sum(v.item() for v in entropies)
+        tot_divergence = sum(v.item() for v in divergences)
+        tot_val_loss = sum(v.item() for v in val_losses)
 
         self.actor_optimizer.zero_grad()
         self.critic_optimizer.zero_grad()
