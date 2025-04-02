@@ -141,6 +141,7 @@ class ExperienceBuffer(
             "rb",
         ) as f:
             state_dict = pickle.load(f)
+        self.agent_ids = state_dict["agent_ids"]
         self.observations = state_dict["observations"]
         self.actions = state_dict["actions"]
         self.log_probs = state_dict["log_probs"]
@@ -155,6 +156,7 @@ class ExperienceBuffer(
         ) as f:
             pickle.dump(
                 {
+                    "agent_ids": self.agent_ids,
                     "observations": self.observations,
                     "actions": self.actions,
                     "log_probs": self.log_probs,
