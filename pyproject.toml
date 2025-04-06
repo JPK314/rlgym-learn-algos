@@ -16,7 +16,7 @@ dependencies = [
     "torch>1.13",
     "typing_extensions>4.6",
     "wandb>0.15",
-    "rlgym-learn==0.1.7"
+    "rlgym-learn>=0.1.7"
 ]
 [tool.maturin]
 features = ["pyo3/extension-module"]
