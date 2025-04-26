@@ -5,10 +5,39 @@ build-backend = "maturin"
 [project]
 name = "rlgym-learn-algos"
 requires-python = ">=3.8,<3.13"
+authors = [
+    { name = "Jonathan Keegan" }
+]
 classifiers = [
     "Programming Language :: Rust",
     "Programming Language :: Python :: Implementation :: CPython",
 ]
-dynamic = ["version"]
+description = "Algorithm implementations for rlgym-learn"
+dynamic = ["license", "readme", "version"]
+dependencies = [
+    "pydantic>=2.8.2",
+    "numpy>1.21",
+    "torch>1.13",
+    "typing_extensions>4.6",
+    "rlgym>=2.0.0",
+    "rlgym-learn>=0.1.7",
+]
+keywords=[
+    "rocket-league",
+    "gym",
+    "reinforcement-learning",
+    "simulation",
+    "ppo",
+    "rlgym",
+    "rocketsim",
+]
+
+[project.urls]
+Repository = "https://github.com/JPK314/rlgym-learn-algos.git"
+Issues = "https://github.com/JPK314/rlgym-learn-algos/issues"
+
+[project.optional-dependencies]
+wandb = ["wandb>0.15"]
+
 [tool.maturin]
 features = ["pyo3/extension-module"]
