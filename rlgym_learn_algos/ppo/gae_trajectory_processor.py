@@ -134,6 +134,7 @@ class GAETrajectoryProcessor(
             "rt",
         ) as f:
             state = json.load(f)
+        # TODO: why are these 4 getting saved/loaded?? They should just come from config
         self.gamma = state["gamma"]
         self.lmbda = state["lambda"]
         self.standardize_returns = state["standardize_returns"]

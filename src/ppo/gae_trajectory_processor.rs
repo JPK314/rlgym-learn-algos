@@ -69,6 +69,7 @@ macro_rules! define_process_trajectories {
                 let mut return_list = Vec::with_capacity(total_experience);
                 let mut reward_sum = 0 as $dtype;
                 for trajectory in trajectories.into_iter() {
+                    let trajectory_len = trajectory.obs_list.len();
                     let mut cur_return = 0 as $dtype;
                     let mut next_val_pred = trajectory.final_val_pred.extract::<$dtype>()?;
                     let mut cur_advantage = 0 as $dtype;
@@ -91,6 +92,12 @@ macro_rules! define_process_trajectories {
                         );
                         mem
                     };
+                    let mut trajectory_agent_id_list = Vec::with_capacity(trajectory_len);
+                    let mut trajectory_observation_list = Vec::with_capacity(trajectory_len);
+                    let mut trajectory_action_list = Vec::with_capacity(trajectory_len);
+                    let mut trajectory_advantage_list = Vec::with_capacity(trajectory_len);
+                    let mut trajectory_return_list = Vec::with_capacity(trajectory_len);
+
                     for (obs, action, reward, &val_pred) in itertools::izip!(
                         trajectory.obs_list,
                         trajectory.action_list,
@@ -109,12 +116,22 @@ macro_rules! define_process_trajectories {
                         next_val_pred = val_pred;
                         cur_advantage = delta + gamma * lambda * cur_advantage;
                         cur_return = reward + gamma * cur_return;
-                        agent_id_list.push(trajectory.agent_id.clone());
-                        observation_list.push(obs);
-                        action_list.push(action);
-                        advantage_list.push(cur_advantage);
-                        return_list.push(cur_return);
+                        trajectory_agent_id_list.push(trajectory.agent_id.clone());
+                        trajectory_observation_list.push(obs);
+                        trajectory_action_list.push(action);
+                        trajectory_advantage_list.push(cur_advantage);
+                        trajectory_return_list.push(cur_return);
                     }
+                    trajectory_agent_id_list.reverse();
+                    trajectory_observation_list.reverse();
+                    trajectory_action_list.reverse();
+                    trajectory_advantage_list.reverse();
+                    trajectory_return_list.reverse();
+                    agent_id_list.append(&mut trajectory_agent_id_list);
+                    observation_list.append(&mut trajectory_observation_list);
+                    action_list.append(&mut trajectory_action_list);
+                    advantage_list.append(&mut trajectory_advantage_list);
+                    return_list.append(&mut trajectory_return_list);
                 }
                 Ok((
                     agent_id_list,
