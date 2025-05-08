@@ -47,7 +47,10 @@ class PPOMetricsLogger(
                 "Timesteps Collected": data.timesteps_collected,
             },
             "PPO Metrics": {
+                "Average Reward": data.trajectory_processor_data.average_reward,
                 "Average Undiscounted Episodic Return": data.trajectory_processor_data.average_undiscounted_episodic_return,
+                "Average Return": data.trajectory_processor_data.average_return,
+                "Return Standard Deviation": data.trajectory_processor_data.return_standard_deviation,
                 "Cumulative Model Updates": data.ppo_data.cumulative_model_updates,
                 "Actor Entropy": data.ppo_data.actor_entropy,
                 "Mean KL Divergence": data.ppo_data.kl_divergence,

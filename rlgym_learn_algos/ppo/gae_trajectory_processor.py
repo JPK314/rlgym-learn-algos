@@ -29,6 +29,7 @@ class GAETrajectoryProcessorConfigModel(BaseModel):
 
 @dataclass
 class GAETrajectoryProcessorData:
+    average_reward: float
     average_undiscounted_episodic_return: float
     average_return: float
     return_standard_deviation: float
@@ -71,6 +72,7 @@ class GAETrajectoryProcessor(
             advantage_array,
             return_array,
             avg_reward,
+            avg_undiscounted_return,
         ) = self.rust_gae_trajectory_processor.process_trajectories(
             trajectories, return_std
         )
@@ -83,15 +85,11 @@ class GAETrajectoryProcessor(
 
             for sample in return_array[:n_to_increment]:
                 self.return_stats.update(sample)
-            avg_return = self.return_stats.mean
-            return_std = self.return_stats.std
-        else:
-            avg_return = np.nan
-            return_std = np.nan
         trajectory_processor_data = GAETrajectoryProcessorData(
-            average_undiscounted_episodic_return=avg_reward,
-            average_return=avg_return,
-            return_standard_deviation=return_std,
+            average_reward=avg_reward,
+            average_undiscounted_episodic_return=avg_undiscounted_return,
+            average_return=return_array.mean(),
+            return_standard_deviation=return_array.std(),
         )
         return (
             (

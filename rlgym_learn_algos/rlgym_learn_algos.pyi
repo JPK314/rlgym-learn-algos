@@ -35,4 +35,5 @@ class GAETrajectoryProcessor(Generic[AgentID, ObsType, ActionType, RewardType]):
         ndarray,
         ndarray,
         float,
+        float,
     ]: ...

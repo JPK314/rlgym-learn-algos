@@ -231,6 +231,7 @@ class PPOAgentController(
                 os.path.join(agent_controller_config.checkpoint_load_folder, "../..")
             )
             abs_save_folder = os.path.abspath(config.save_folder)
+            # TODO: this doesn't seem to be working
             if abs_save_folder == loaded_checkpoint_runs_folder:
                 print(
                     "Using the loaded checkpoint's run folder as the checkpoints save folder."
@@ -562,3 +563,5 @@ class PPOAgentController(
         for idx, (start, stop) in enumerate(traj_timestep_idx_ranges):
             self.current_trajectories[idx].val_preds = val_preds[start : stop - 1]
             self.current_trajectories[idx].final_val_pred = val_preds[stop - 1]
+        if self.device != "cpu":
+            torch.cuda.current_stream().synchronize()

@@ -51,6 +51,7 @@ macro_rules! define_process_trajectories {
                 Bound<'py, PyAny>,
                 Bound<'py, PyAny>,
                 Bound<'py, PyAny>,
+                Bound<'py, PyAny>,
             )> {
                 let return_std = return_std.extract::<$dtype>()?;
                 let gamma = gamma.extract::<$dtype>()?;
@@ -60,6 +61,7 @@ macro_rules! define_process_trajectories {
                     .iter()
                     .map(|trajectory| trajectory.obs_list.len())
                     .sum::<usize>();
+                let n_trajectories = trajectories.len();
                 let mut agent_id_list = Vec::with_capacity(total_experience);
                 let mut observation_list = Vec::with_capacity(total_experience);
                 let mut action_list = Vec::with_capacity(total_experience);
@@ -146,6 +148,7 @@ macro_rules! define_process_trajectories {
                         .to_pyarray(py)
                         .into_any(),
                     (reward_sum / (total_experience as $dtype)).into_pyobject(py)?.into_any(),
+                    (reward_sum / (n_trajectories as $dtype)).into_pyobject(py)?.into_any()
                 ))
             }
         }
@@ -196,6 +199,7 @@ impl GAETrajectoryProcessor {
         return_std: Bound<'py, PyAny>,
     ) -> PyResult<(
         Vec<Bound<'py, PyAny>>,
+        Bound<'py, PyAny>,
         Bound<'py, PyAny>,
         Bound<'py, PyAny>,
         Bound<'py, PyAny>,
