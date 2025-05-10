@@ -20,7 +20,7 @@ from ..ppo import RustDerivedGAETrajectoryProcessorConfig, RustGAETrajectoryProc
 from .trajectory_processor import TRAJECTORY_PROCESSOR_FILE, TrajectoryProcessor
 
 
-class GAETrajectoryProcessorConfigModel(BaseModel):
+class GAETrajectoryProcessorConfigModel(BaseModel, extra="forbid"):
     gamma: float = 0.99
     lmbda: float = 0.95
     standardize_returns: bool = True

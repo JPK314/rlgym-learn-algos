@@ -29,7 +29,7 @@ def convert_nested_dict(d):
     return new
 
 
-class WandbMetricsLoggerConfigModel(BaseModel):
+class WandbMetricsLoggerConfigModel(BaseModel, extra="forbid"):
     enable: bool = True
     project: str = "rlgym-learn"
     group: str = "unnamed-runs"

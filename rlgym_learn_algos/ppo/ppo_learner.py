@@ -24,7 +24,7 @@ from .experience_buffer import ExperienceBuffer
 from .trajectory_processor import TrajectoryProcessorConfig, TrajectoryProcessorData
 
 
-class PPOLearnerConfigModel(BaseModel):
+class PPOLearnerConfigModel(BaseModel, extra="forbid"):
     n_epochs: int = 1
     batch_size: int = 50000
     n_minibatches: int = 1

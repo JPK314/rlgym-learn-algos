@@ -62,7 +62,7 @@ ITERATION_SHARED_INFOS_FILE = "iteration_shared_infos.pkl"
 CURRENT_TRAJECTORIES_FILE = "current_trajectories.pkl"
 
 
-class PPOAgentControllerConfigModel(BaseModel):
+class PPOAgentControllerConfigModel(BaseModel, extra="forbid"):
     timesteps_per_iteration: int = 50000
     save_every_ts: int = 1_000_000
     add_unix_timestamp: bool = True

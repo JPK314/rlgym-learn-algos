@@ -19,7 +19,7 @@ from .trajectory_processor import (
 EXPERIENCE_BUFFER_FILE = "experience_buffer.pkl"
 
 
-class ExperienceBufferConfigModel(BaseModel):
+class ExperienceBufferConfigModel(BaseModel, extra="forbid"):
     max_size: int = 100000
     trajectory_processor_config: Dict[str, Any] = Field(default_factory=dict)
 
