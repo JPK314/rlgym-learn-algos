@@ -37,6 +37,7 @@ class WandbMetricsLoggerConfigModel(BaseModel, extra="forbid"):
     id: Optional[str] = None
     new_run_with_timestamp_suffix: bool = False
     additional_wandb_run_config: Dict[str, Any] = Field(default_factory=dict)
+    settings_kwargs: Dict[str, Any] = Field(default_factory=dict)
 
 
 @dataclass
@@ -145,6 +146,9 @@ class WandbMetricsLogger(
             id=self.run_id,
             resume="allow",
             reinit=True,
+            settings=wandb.Settings(
+                **self.config.metrics_logger_config.settings_kwargs
+            ),
         )
         self.run_id = self.wandb_run.id
         print(f"{self.config.agent_controller_name}: Created wandb run! {self.run_id}")
