@@ -7,7 +7,7 @@ from typing import Generic, Optional
 
 import numpy as np
 import torch
-from pydantic import BaseModel
+from pydantic import BaseModel, model_validator
 from rlgym.api import (
     ActionSpaceType,
     ActionType,
@@ -18,6 +18,8 @@ from rlgym.api import (
 )
 from torch import nn as nn
 
+from rlgym_learn_algos.util.torch_functions import get_device
+
 from .actor import Actor
 from .critic import Critic
 from .experience_buffer import ExperienceBuffer
@@ -25,6 +27,7 @@ from .trajectory_processor import TrajectoryProcessorConfig, TrajectoryProcessor
 
 
 class PPOLearnerConfigModel(BaseModel, extra="forbid"):
+    dtype: str = "float32"
     n_epochs: int = 1
     batch_size: int = 50000
     n_minibatches: int = 1
@@ -32,20 +35,20 @@ class PPOLearnerConfigModel(BaseModel, extra="forbid"):
     clip_range: float = 0.2
     actor_lr: float = 3e-4
     critic_lr: float = 3e-4
+    device: str = "auto"
+
+    @model_validator(mode="after")
+    def set_device(self):
+        if self.device == "auto":
+            self.device = get_device(self.device)
+        return self
 
 
 @dataclass
 class DerivedPPOLearnerConfig:
+    learner_config: PPOLearnerConfigModel
     obs_space: ObsSpaceType
     action_space: ActionSpaceType
-    n_epochs: int = 10
-    batch_size: int = 50000
-    n_minibatches: int = 1
-    ent_coef: float = 0.005
-    clip_range: float = 0.2
-    actor_lr: float = 3e-4
-    critic_lr: float = 3e-4
-    device: str = "auto"
     checkpoint_load_folder: Optional[str] = None
 
 

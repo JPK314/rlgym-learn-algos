@@ -161,18 +161,10 @@ class GAETrajectoryProcessorPurePython(
             "rt",
         ) as f:
             state = json.load(f)
-        self.gamma = state["gamma"]
-        self.lmbda = state["lambda"]
-        self.standardize_returns = state["standardize_returns"]
-        self.max_returns_per_stats_increment = state["max_returns_per_stats_increment"]
         self.return_stats.load_state_dict(state["return_running_stats"])
 
     def save_checkpoint(self, folder_path):
         state = {
-            "gamma": self.gamma,
-            "lambda": self.lmbda,
-            "standardize_returns": self.standardize_returns,
-            "max_returns_per_stats_increment": self.max_returns_per_stats_increment,
             "return_running_stats": self.return_stats.state_dict(),
         }
         with open(

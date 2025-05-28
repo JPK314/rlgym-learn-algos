@@ -69,8 +69,6 @@ class PPOAgentControllerConfigModel(BaseModel, extra="forbid"):
     checkpoint_load_folder: Optional[str] = None
     n_checkpoints_to_keep: int = 5
     random_seed: int = 123
-    dtype: str = "float32"
-    device: Optional[str] = None
     learner_config: PPOLearnerConfigModel = Field(default_factory=PPOLearnerConfigModel)
     experience_buffer_config: ExperienceBufferConfigModel = Field(
         default_factory=ExperienceBufferConfigModel
@@ -190,11 +188,9 @@ class PPOAgentController(
 
     def load(self, config):
         self.config = config
-        device = config.agent_controller_config.device
-        if device is None:
-            device = config.base_config.device
-        self.device = get_device(device)
-        print(f"{self.config.agent_controller_name}: Using device {self.device}")
+        print(
+            f"{self.config.agent_controller_name}: Using device {config.agent_controller_config.learner_config.device}"
+        )
         agent_controller_config = config.agent_controller_config
         learner_config = config.agent_controller_config.learner_config
         experience_buffer_config = (
@@ -257,26 +253,18 @@ class PPOAgentController(
 
         self.learner.load(
             DerivedPPOLearnerConfig(
+                learner_config=learner_config,
                 obs_space=self.obs_space,
                 action_space=self.action_space,
-                n_epochs=learner_config.n_epochs,
-                batch_size=learner_config.batch_size,
-                n_minibatches=learner_config.n_minibatches,
-                ent_coef=learner_config.ent_coef,
-                clip_range=learner_config.clip_range,
-                actor_lr=learner_config.actor_lr,
-                critic_lr=learner_config.critic_lr,
-                device=self.device,
                 checkpoint_load_folder=learner_checkpoint_load_folder,
             )
         )
         self.experience_buffer.load(
             DerivedExperienceBufferConfig(
-                max_size=experience_buffer_config.max_size,
-                seed=agent_controller_config.random_seed,
-                dtype=agent_controller_config.dtype,
-                device=self.device,
-                trajectory_processor_config=experience_buffer_config.trajectory_processor_config,
+                experience_buffer_config=experience_buffer_config,
+                seed=config.base_config.random_seed,
+                dtype=agent_controller_config.learner_config.dtype,
+                learner_device=agent_controller_config.learner_config.device,
                 checkpoint_load_folder=experience_buffer_checkpoint_load_folder,
             )
         )

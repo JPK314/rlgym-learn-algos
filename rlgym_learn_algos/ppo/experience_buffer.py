@@ -21,6 +21,7 @@ EXPERIENCE_BUFFER_FILE = "experience_buffer.pkl"
 
 class ExperienceBufferConfigModel(BaseModel, extra="forbid"):
     max_size: int = 100000
+    device: str = "auto"
     trajectory_processor_config: Dict[str, Any] = Field(default_factory=dict)
 
     @model_validator(mode="before")
@@ -41,11 +42,10 @@ class ExperienceBufferConfigModel(BaseModel, extra="forbid"):
 
 @dataclass
 class DerivedExperienceBufferConfig:
-    max_size: int
+    experience_buffer_config: ExperienceBufferConfigModel
     seed: int
     dtype: str
-    device: str
-    trajectory_processor_config: Dict[str, Any]
+    learner_device: str
     checkpoint_load_folder: Optional[str] = None
 
 
@@ -119,20 +119,20 @@ class ExperienceBuffer(
         self.config = config
         self.rng = np.random.RandomState(config.seed)
         trajectory_processor_config = self.trajectory_processor.validate_config(
-            config.trajectory_processor_config
+            config.experience_buffer_config.trajectory_processor_config
         )
         self.trajectory_processor.load(
             DerivedTrajectoryProcessorConfig(
                 trajectory_processor_config=trajectory_processor_config,
                 dtype=config.dtype,
-                device=config.device,
+                device=config.learner_device,
             )
         )
         if self.config.checkpoint_load_folder is not None:
             self._load_from_checkpoint()
-        self.log_probs = self.log_probs.to(config.device)
-        self.values = self.values.to(config.device)
-        self.advantages = self.advantages.to(config.device)
+        self.log_probs = self.log_probs.to(config.learner_device)
+        self.values = self.values.to(config.learner_device)
+        self.advantages = self.advantages.to(config.learner_device)
 
     def _load_from_checkpoint(self):
         # lazy way
@@ -218,6 +218,7 @@ class ExperienceBuffer(
 
         return trajectory_processor_data
 
+    # TODO: tensordict?
     def _get_samples(self, indices) -> Tuple[
         Iterable[AgentID],
         Iterable[ObsType],
@@ -242,18 +243,14 @@ class ExperienceBuffer(
         :param batch_size: size of each batch yielded by the generator.
         :return:
         """
-        if self.config.device != "cpu":
+        if self.config.learner_device != "cpu":
             torch.cuda.current_stream().synchronize()
         total_samples = self.values.shape[0]
         indices = self.rng.permutation(total_samples)
         start_idx = 0
-        batches = []
         while start_idx + batch_size <= total_samples:
-            batches.append(
-                self._get_samples(indices[start_idx : start_idx + batch_size])
-            )
+            yield self._get_samples(indices[start_idx : start_idx + batch_size])
             start_idx += batch_size
-        return batches
 
     def clear(self):
         """
@@ -265,4 +262,4 @@ class ExperienceBuffer(
         del self.log_probs
         del self.values
         del self.advantages
-        self.__init__(self.max_size, self.seed, self.device)
+        self.__init__(self.max_size, self.seed, self.learner_device)

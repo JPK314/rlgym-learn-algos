@@ -121,13 +121,9 @@ class NumpyExperienceBuffer(
         total_samples = self.values.shape[0]
         indices = self.rng.permutation(total_samples)
         start_idx = 0
-        batches = []
         while start_idx + batch_size <= total_samples:
-            batches.append(
-                self._get_samples(indices[start_idx : start_idx + batch_size])
-            )
+            yield self._get_samples(indices[start_idx : start_idx + batch_size])
             start_idx += batch_size
-        return batches
 
     def clear(self):
         """
