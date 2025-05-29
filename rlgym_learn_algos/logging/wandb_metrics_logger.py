@@ -37,6 +37,7 @@ class WandbMetricsLoggerConfigModel(BaseModel, extra="forbid"):
     id: Optional[str] = None
     new_run_with_timestamp_suffix: bool = False
     additional_wandb_run_config: Dict[str, Any] = Field(default_factory=dict)
+    settings_kwargs: Dict[str, Any] = Field(default_factory=dict)
 
 
 @dataclass
@@ -76,6 +77,7 @@ class WandbMetricsLogger(
     ):
         self.inner_metrics_logger = inner_metrics_logger
         self.checkpoint_file_name = checkpoint_file_name
+        self.run_id = None
 
     def collect_env_metrics(self, data: List[Dict[str, Any]]):
         self.inner_metrics_logger.collect_env_metrics(data)
@@ -107,17 +109,11 @@ class WandbMetricsLogger(
             self.run_id = None
             return
 
-        if (
-            self.config.checkpoint_load_folder is not None
-            and self.config.metrics_logger_config.id is not None
-        ):
-            if self.run_id is not None:
-                print(
-                    f"{self.config.agent_controller_name}: Wandb run id from checkpoint ({self.run_id}) is being overridden by wandb run id from config: {self.config.metrics_logger_config.id}"
-                )
+        if self.run_id is not None and self.config.metrics_logger_config.id is not None:
+            print(
+                f"{self.config.agent_controller_name}: Wandb run id from checkpoint ({self.run_id}) is being overridden by wandb run id from config: {self.config.metrics_logger_config.id}"
+            )
             self.run_id = self.config.metrics_logger_config.id
-        else:
-            self.run_id = None
 
         wandb_config = {
             **self.config.additional_derived_config.derived_wandb_run_config,
@@ -145,22 +141,31 @@ class WandbMetricsLogger(
             id=self.run_id,
             resume="allow",
             reinit=True,
+            settings=wandb.Settings(
+                **self.config.metrics_logger_config.settings_kwargs
+            ),
         )
         self.run_id = self.wandb_run.id
         print(f"{self.config.agent_controller_name}: Created wandb run! {self.run_id}")
 
     def _load_from_checkpoint(self):
-        with open(
-            os.path.join(
-                self.config.checkpoint_load_folder,
-                self.checkpoint_file_name,
-            ),
-            "rt",
-        ) as f:
-            state = json.load(f)
-        if "run_id" in state:
-            self.run_id = state["run_id"]
-        else:
+        try:
+            with open(
+                os.path.join(
+                    self.config.checkpoint_load_folder,
+                    self.checkpoint_file_name,
+                ),
+                "rt",
+            ) as f:
+                state = json.load(f)
+            if "run_id" in state:
+                self.run_id = state["run_id"]
+            else:
+                self.run_id = None
+        except FileNotFoundError:
+            print(
+                f"{self.config.agent_controller_name}: Tried to load from checkpoint, but checkpoint didn't contain a wandb run! A new run will be created based on the config values."
+            )
             self.run_id = None
 
     def save_checkpoint(self, folder_path):

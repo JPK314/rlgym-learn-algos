@@ -12,9 +12,9 @@ MetricsLoggerAdditionalDerivedConfig = TypeVar("MetricsLoggerAdditionalDerivedCo
 class DerivedMetricsLoggerConfig(
     Generic[MetricsLoggerConfig, MetricsLoggerAdditionalDerivedConfig]
 ):
+    metrics_logger_config: MetricsLoggerConfig = None
     checkpoint_load_folder: Optional[str] = None
     agent_controller_name: str = ""
-    metrics_logger_config: MetricsLoggerConfig = None
     additional_derived_config: MetricsLoggerAdditionalDerivedConfig = None
 
 

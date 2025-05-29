@@ -3,7 +3,7 @@ from dataclasses import dataclass
 from typing import Any, Dict, Generic, List, Optional, Tuple, TypeVar
 
 from rlgym.api import ActionType, AgentID, ObsType, RewardType
-from torch import Tensor
+from torch import Tensor, device, dtype
 
 from .trajectory import Trajectory
 
@@ -16,8 +16,8 @@ TRAJECTORY_PROCESSOR_FILE = "trajectory_processor.json"
 @dataclass
 class DerivedTrajectoryProcessorConfig(Generic[TrajectoryProcessorConfig]):
     trajectory_processor_config: TrajectoryProcessorConfig
-    dtype: str
-    device: str
+    dtype: dtype
+    device: device
     checkpoint_load_folder: Optional[str] = None
 
 

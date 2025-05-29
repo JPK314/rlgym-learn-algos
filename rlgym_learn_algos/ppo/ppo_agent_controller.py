@@ -24,8 +24,6 @@ from rlgym.api import (
 )
 from rlgym_learn import EnvActionResponse, EnvActionResponseType, Timestep
 from rlgym_learn.api.agent_controller import AgentController
-from torch import device as _device
-
 from rlgym_learn_algos.logging import (
     DerivedMetricsLoggerConfig,
     MetricsLogger,
@@ -36,6 +34,7 @@ from rlgym_learn_algos.logging import (
 )
 from rlgym_learn_algos.stateful_functions import ObsStandardizer
 from rlgym_learn_algos.util.torch_functions import get_device
+from torch import device as _device
 
 from .actor import Actor
 from .critic import Critic
@@ -69,8 +68,6 @@ class PPOAgentControllerConfigModel(BaseModel, extra="forbid"):
     checkpoint_load_folder: Optional[str] = None
     n_checkpoints_to_keep: int = 5
     random_seed: int = 123
-    dtype: str = "float32"
-    device: Optional[str] = None
     learner_config: PPOLearnerConfigModel = Field(default_factory=PPOLearnerConfigModel)
     experience_buffer_config: ExperienceBufferConfigModel = Field(
         default_factory=ExperienceBufferConfigModel
@@ -190,11 +187,9 @@ class PPOAgentController(
 
     def load(self, config):
         self.config = config
-        device = config.agent_controller_config.device
-        if device is None:
-            device = config.base_config.device
-        self.device = get_device(device)
-        print(f"{self.config.agent_controller_name}: Using device {self.device}")
+        print(
+            f"{self.config.agent_controller_name}: Using device {config.agent_controller_config.learner_config.device}"
+        )
         agent_controller_config = config.agent_controller_config
         learner_config = config.agent_controller_config.learner_config
         experience_buffer_config = (
@@ -234,14 +229,14 @@ class PPOAgentController(
             # TODO: this doesn't seem to be working
             if abs_save_folder == loaded_checkpoint_runs_folder:
                 print(
-                    "Using the loaded checkpoint's run folder as the checkpoints save folder."
+                    f"{config.agent_controller_name}: Using the loaded checkpoint's run folder as the checkpoints save folder."
                 )
                 checkpoints_save_folder = os.path.abspath(
                     os.path.join(agent_controller_config.checkpoint_load_folder, "..")
                 )
             else:
                 print(
-                    "Runs folder in config does not align with loaded checkpoint's runs folder. Creating new run in the config-based runs folder."
+                    f"{config.agent_controller_name}: Runs folder in config does not align with loaded checkpoint's runs folder. Creating new run in the config-based runs folder."
                 )
                 checkpoints_save_folder = os.path.join(
                     config.save_folder, agent_controller_config.run_name + run_suffix
@@ -257,26 +252,19 @@ class PPOAgentController(
 
         self.learner.load(
             DerivedPPOLearnerConfig(
+                learner_config=learner_config,
                 obs_space=self.obs_space,
                 action_space=self.action_space,
-                n_epochs=learner_config.n_epochs,
-                batch_size=learner_config.batch_size,
-                n_minibatches=learner_config.n_minibatches,
-                ent_coef=learner_config.ent_coef,
-                clip_range=learner_config.clip_range,
-                actor_lr=learner_config.actor_lr,
-                critic_lr=learner_config.critic_lr,
-                device=self.device,
                 checkpoint_load_folder=learner_checkpoint_load_folder,
             )
         )
         self.experience_buffer.load(
             DerivedExperienceBufferConfig(
-                max_size=experience_buffer_config.max_size,
-                seed=agent_controller_config.random_seed,
-                dtype=agent_controller_config.dtype,
-                device=self.device,
-                trajectory_processor_config=experience_buffer_config.trajectory_processor_config,
+                experience_buffer_config=experience_buffer_config,
+                agent_controller_name=config.agent_controller_name,
+                seed=config.base_config.random_seed,
+                dtype=agent_controller_config.learner_config.dtype,
+                learner_device=agent_controller_config.learner_config.device,
                 checkpoint_load_folder=experience_buffer_checkpoint_load_folder,
             )
         )
@@ -301,9 +289,9 @@ class PPOAgentController(
                 additional_derived_config = None
             self.metrics_logger.load(
                 DerivedMetricsLoggerConfig(
+                    metrics_logger_config=metrics_logger_config,
                     checkpoint_load_folder=metrics_logger_checkpoint_load_folder,
                     agent_controller_name=config.agent_controller_name,
-                    metrics_logger_config=metrics_logger_config,
                     additional_derived_config=additional_derived_config,
                 )
             )
@@ -465,6 +453,7 @@ class PPOAgentController(
         ):
             self.timestep_collection_end_time = time.perf_counter()
             self._learn()
+            self.cur_iteration += 1
         if self.ts_since_last_save >= self.config.agent_controller_config.save_every_ts:
             self.save_checkpoint()
             self.ts_since_last_save = 0
@@ -563,5 +552,5 @@ class PPOAgentController(
         for idx, (start, stop) in enumerate(traj_timestep_idx_ranges):
             self.current_trajectories[idx].val_preds = val_preds[start : stop - 1]
             self.current_trajectories[idx].final_val_pred = val_preds[stop - 1]
-        if self.device != "cpu":
+        if self.config.agent_controller_config.learner_config.device.type != "cpu":
             torch.cuda.current_stream().synchronize()
