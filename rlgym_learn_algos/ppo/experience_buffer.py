@@ -8,6 +8,9 @@ import torch
 from pydantic import BaseModel, Field, model_validator
 from rlgym.api import ActionType, AgentID, ObsType, RewardType
 
+from rlgym_learn_algos.util.torch_functions import get_device
+from rlgym_learn_algos.util.torch_pydantic import PydanticTorchDevice
+
 from .trajectory import Trajectory
 from .trajectory_processor import (
     DerivedTrajectoryProcessorConfig,
@@ -21,7 +24,7 @@ EXPERIENCE_BUFFER_FILE = "experience_buffer.pkl"
 
 class ExperienceBufferConfigModel(BaseModel, extra="forbid"):
     max_size: int = 100000
-    device: str = "auto"
+    device: PydanticTorchDevice = "auto"
     trajectory_processor_config: Dict[str, Any] = Field(default_factory=dict)
 
     @model_validator(mode="before")
@@ -32,20 +35,35 @@ class ExperienceBufferConfigModel(BaseModel, extra="forbid"):
                 data.trajectory_processor_config = (
                     data.trajectory_processor_config.model_dump()
                 )
-        elif isinstance(data, dict) and "trajectory_processor_config" in data:
-            if isinstance(data["trajectory_processor_config"], BaseModel):
-                data["trajectory_processor_config"] = data[
-                    "trajectory_processor_config"
-                ].model_dump()
+        elif isinstance(data, dict):
+            if "trajectory_processor_config" in data:
+                if isinstance(data["trajectory_processor_config"], BaseModel):
+                    data["trajectory_processor_config"] = data[
+                        "trajectory_processor_config"
+                    ].model_dump()
+            if "device" not in data or data["device"] == "auto":
+                data["device"] = get_device("auto")
         return data
+
+    # device: PydanticTorchDevice = "auto"
+
+    # @model_validator(mode="before")
+    # @classmethod
+    # def set_device(cls, data):
+    #     if isinstance(data, dict) and (
+    #         "device" not in data or data["device"] == "auto"
+    #     ):
+    #         data["device"] = get_device("auto")
+    #     return data
 
 
 @dataclass
 class DerivedExperienceBufferConfig:
     experience_buffer_config: ExperienceBufferConfigModel
+    agent_controller_name: str
     seed: int
-    dtype: str
-    learner_device: str
+    dtype: torch.dtype
+    learner_device: torch.device
     checkpoint_load_folder: Optional[str] = None
 
 
@@ -111,9 +129,6 @@ class ExperienceBuffer(
         self.agent_ids: List[AgentID] = []
         self.observations: List[ObsType] = []
         self.actions: List[ActionType] = []
-        self.log_probs = torch.FloatTensor()
-        self.values = torch.FloatTensor()
-        self.advantages = torch.FloatTensor()
 
     def load(self, config: DerivedExperienceBufferConfig):
         self.config = config
@@ -128,6 +143,9 @@ class ExperienceBuffer(
                 device=config.learner_device,
             )
         )
+        self.log_probs = torch.tensor([], dtype=config.dtype)
+        self.values = torch.tensor([], dtype=config.dtype)
+        self.advantages = torch.tensor([], dtype=config.dtype)
         if self.config.checkpoint_load_folder is not None:
             self._load_from_checkpoint()
         self.log_probs = self.log_probs.to(config.learner_device)
@@ -136,17 +154,25 @@ class ExperienceBuffer(
 
     def _load_from_checkpoint(self):
         # lazy way
-        with open(
-            os.path.join(self.config.checkpoint_load_folder, EXPERIENCE_BUFFER_FILE),
-            "rb",
-        ) as f:
-            state_dict = pickle.load(f)
-        self.agent_ids = state_dict["agent_ids"]
-        self.observations = state_dict["observations"]
-        self.actions = state_dict["actions"]
-        self.log_probs = state_dict["log_probs"]
-        self.values = state_dict["values"]
-        self.advantages = state_dict["advantages"]
+        # TODO: don't use pickle for torch things, use torch.load because of map_location. Or maybe define a custom unpickler for this? Or maybe one already exists?
+        try:
+            with open(
+                os.path.join(
+                    self.config.checkpoint_load_folder, EXPERIENCE_BUFFER_FILE
+                ),
+                "rb",
+            ) as f:
+                state_dict = pickle.load(f)
+            self.agent_ids = state_dict["agent_ids"]
+            self.observations = state_dict["observations"]
+            self.actions = state_dict["actions"]
+            self.log_probs = state_dict["log_probs"]
+            self.values = state_dict["values"]
+            self.advantages = state_dict["advantages"]
+        except FileNotFoundError:
+            print(
+                f"{self.config.agent_controller_name}: Tried to load from checkpoint, but checkpoint didn't contain a saved experience buffer! A blank experience buffer will be used instead."
+            )
 
     def save_checkpoint(self, folder_path):
         os.makedirs(folder_path, exist_ok=True)
@@ -195,25 +221,31 @@ class ExperienceBuffer(
             exp_buffer_data
         )
 
-        self.agent_ids = _cat_list(self.agent_ids, agent_ids, self.config.max_size)
-        self.observations = _cat_list(
-            self.observations, observations, self.config.max_size
+        self.agent_ids = _cat_list(
+            self.agent_ids, agent_ids, self.config.experience_buffer_config.max_size
         )
-        self.actions = _cat_list(self.actions, actions, self.config.max_size)
+        self.observations = _cat_list(
+            self.observations,
+            observations,
+            self.config.experience_buffer_config.max_size,
+        )
+        self.actions = _cat_list(
+            self.actions, actions, self.config.experience_buffer_config.max_size
+        )
         self.log_probs = _cat(
             self.log_probs,
             log_probs,
-            self.config.max_size,
+            self.config.experience_buffer_config.max_size,
         )
         self.values = _cat(
             self.values,
             values,
-            self.config.max_size,
+            self.config.experience_buffer_config.max_size,
         )
         self.advantages = _cat(
             self.advantages,
             advantages,
-            self.config.max_size,
+            self.config.experience_buffer_config.max_size,
         )
 
         return trajectory_processor_data
@@ -243,7 +275,7 @@ class ExperienceBuffer(
         :param batch_size: size of each batch yielded by the generator.
         :return:
         """
-        if self.config.learner_device != "cpu":
+        if self.config.learner_device.type != "cpu":
             torch.cuda.current_stream().synchronize()
         total_samples = self.values.shape[0]
         indices = self.rng.permutation(total_samples)
@@ -262,4 +294,4 @@ class ExperienceBuffer(
         del self.log_probs
         del self.values
         del self.advantages
-        self.__init__(self.max_size, self.seed, self.learner_device)
+        self.__init__(self.trajectory_processor)

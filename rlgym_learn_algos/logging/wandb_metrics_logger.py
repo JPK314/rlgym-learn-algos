@@ -154,17 +154,23 @@ class WandbMetricsLogger(
         print(f"{self.config.agent_controller_name}: Created wandb run! {self.run_id}")
 
     def _load_from_checkpoint(self):
-        with open(
-            os.path.join(
-                self.config.checkpoint_load_folder,
-                self.checkpoint_file_name,
-            ),
-            "rt",
-        ) as f:
-            state = json.load(f)
-        if "run_id" in state:
-            self.run_id = state["run_id"]
-        else:
+        try:
+            with open(
+                os.path.join(
+                    self.config.checkpoint_load_folder,
+                    self.checkpoint_file_name,
+                ),
+                "rt",
+            ) as f:
+                state = json.load(f)
+            if "run_id" in state:
+                self.run_id = state["run_id"]
+            else:
+                self.run_id = None
+        except FileNotFoundError:
+            print(
+                f"{self.config.agent_controller_name}: Tried to load from checkpoint, but checkpoint didn't contain a wandb run! A new run will be created based on the config values."
+            )
             self.run_id = None
 
     def save_checkpoint(self, folder_path):

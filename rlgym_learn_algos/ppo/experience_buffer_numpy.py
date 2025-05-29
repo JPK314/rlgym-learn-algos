@@ -76,25 +76,31 @@ class NumpyExperienceBuffer(
             exp_buffer_data
         )
 
-        self.agent_ids = _cat_list(self.agent_ids, agent_ids, self.config.max_size)
-        self.observations = _cat_numpy(
-            self.observations, observations, self.config.max_size
+        self.agent_ids = _cat_list(
+            self.agent_ids, agent_ids, self.config.experience_buffer_config.max_size
         )
-        self.actions = _cat_numpy(self.actions, actions, self.config.max_size)
+        self.observations = _cat_numpy(
+            self.observations,
+            observations,
+            self.config.experience_buffer_config.max_size,
+        )
+        self.actions = _cat_numpy(
+            self.actions, actions, self.config.experience_buffer_config.max_size
+        )
         self.log_probs = _cat(
             self.log_probs,
             log_probs,
-            self.config.max_size,
+            self.config.experience_buffer_config.max_size,
         )
         self.values = _cat(
             self.values,
             values,
-            self.config.max_size,
+            self.config.experience_buffer_config.max_size,
         )
         self.advantages = _cat(
             self.advantages,
             advantages,
-            self.config.max_size,
+            self.config.experience_buffer_config.max_size,
         )
 
         return trajectory_processor_data
@@ -116,7 +122,7 @@ class NumpyExperienceBuffer(
         :param batch_size: size of each batch yielded by the generator.
         :return:
         """
-        if self.config.device != "cpu":
+        if self.config.experience_buffer_config.device.type != "cpu":
             torch.cuda.current_stream().synchronize()
         total_samples = self.values.shape[0]
         indices = self.rng.permutation(total_samples)

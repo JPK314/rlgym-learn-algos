@@ -7,7 +7,7 @@ from typing import Generic, Optional
 
 import numpy as np
 import torch
-from pydantic import BaseModel, model_validator
+from pydantic import BaseModel, field_serializer, model_validator
 from rlgym.api import (
     ActionSpaceType,
     ActionType,
@@ -16,9 +16,12 @@ from rlgym.api import (
     ObsType,
     RewardType,
 )
-from torch import nn as nn
-
 from rlgym_learn_algos.util.torch_functions import get_device
+from rlgym_learn_algos.util.torch_pydantic import (
+    PydanticTorchDevice,
+    PydanticTorchDtype,
+)
+from torch import nn as nn
 
 from .actor import Actor
 from .critic import Critic
@@ -27,7 +30,7 @@ from .trajectory_processor import TrajectoryProcessorConfig, TrajectoryProcessor
 
 
 class PPOLearnerConfigModel(BaseModel, extra="forbid"):
-    dtype: str = "float32"
+    dtype: PydanticTorchDtype = torch.float32
     n_epochs: int = 1
     batch_size: int = 50000
     n_minibatches: int = 1
@@ -35,13 +38,38 @@ class PPOLearnerConfigModel(BaseModel, extra="forbid"):
     clip_range: float = 0.2
     actor_lr: float = 3e-4
     critic_lr: float = 3e-4
-    device: str = "auto"
+    device: PydanticTorchDevice = "auto"
 
-    @model_validator(mode="after")
-    def set_device(self):
-        if self.device == "auto":
-            self.device = get_device(self.device)
-        return self
+    @model_validator(mode="before")
+    @classmethod
+    def set_device(cls, data):
+        if isinstance(data, dict) and (
+            "device" not in data or data["device"] == "auto"
+        ):
+            data["device"] = get_device("auto")
+        return data
+
+
+# @model_validator(mode="before")
+# @classmethod
+# def set_agent_controllers_config(cls, data):
+#     if isinstance(data, LearningCoordinatorConfigModel):
+#         agent_controllers_config = {}
+#         for k, v in data.agent_controllers_config.items():
+#             if isinstance(v, BaseModel):
+#                 agent_controllers_config[k] = v.model_dump()
+#             else:
+#                 agent_controllers_config[k] = v
+#         data.agent_controllers_config = agent_controllers_config
+#     elif isinstance(data, dict) and "agent_controllers_config" in data:
+#         agent_controllers_config = {}
+#         for k, v in data["agent_controllers_config"].items():
+#             if isinstance(v, BaseModel):
+#                 agent_controllers_config[k] = v.model_dump()
+#             else:
+#                 agent_controllers_config[k] = v
+#         data["agent_controllers_config"] = agent_controllers_config
+#     return data
 
 
 @dataclass
@@ -100,15 +128,17 @@ class PPOLearner(
         self.config = config
 
         self.actor = self.actor_factory(
-            config.obs_space, config.action_space, config.device
+            config.obs_space, config.action_space, config.learner_config.device
         )
-        self.critic = self.critic_factory(config.obs_space, config.device)
+        self.critic = self.critic_factory(
+            config.obs_space, config.learner_config.device
+        )
 
         self.actor_optimizer = torch.optim.Adam(
-            self.actor.parameters(), lr=self.config.actor_lr
+            self.actor.parameters(), lr=self.config.learner_config.actor_lr
         )
         self.critic_optimizer = torch.optim.Adam(
-            self.critic.parameters(), lr=self.config.critic_lr
+            self.critic.parameters(), lr=self.config.learner_config.critic_lr
         )
         self.critic_loss_fn = torch.nn.MSELoss()
 
@@ -133,14 +163,17 @@ class PPOLearner(
         print("-" * 20)
         print(f"{'Total':<10} {total_parameters:<10}")
 
-        print(f"Current Policy Learning Rate: {self.config.actor_lr}")
-        print(f"Current Critic Learning Rate: {self.config.critic_lr}")
+        print(f"Current Policy Learning Rate: {self.config.learner_config.actor_lr}")
+        print(f"Current Critic Learning Rate: {self.config.learner_config.critic_lr}")
         self.cumulative_model_updates = 0
 
         if self.config.checkpoint_load_folder is not None:
             self._load_from_checkpoint()
         self.minibatch_size = int(
-            np.ceil(self.config.batch_size / self.config.n_minibatches)
+            np.ceil(
+                self.config.learner_config.batch_size
+                / self.config.learner_config.n_minibatches
+            )
         )
 
     def _load_from_checkpoint(self):
@@ -150,19 +183,27 @@ class PPOLearner(
         ), f"PPO Learner cannot find folder: {self.config.checkpoint_load_folder}"
 
         self.actor.load_state_dict(
-            torch.load(os.path.join(self.config.checkpoint_load_folder, ACTOR_FILE))
+            torch.load(
+                os.path.join(self.config.checkpoint_load_folder, ACTOR_FILE),
+                map_location=self.config.learner_config.device,
+            )
         )
         self.critic.load_state_dict(
-            torch.load(os.path.join(self.config.checkpoint_load_folder, CRITIC_FILE))
+            torch.load(
+                os.path.join(self.config.checkpoint_load_folder, CRITIC_FILE),
+                map_location=self.config.learner_config.device,
+            )
         )
         self.actor_optimizer.load_state_dict(
             torch.load(
-                os.path.join(self.config.checkpoint_load_folder, ACTOR_OPTIMIZER_FILE)
+                os.path.join(self.config.checkpoint_load_folder, ACTOR_OPTIMIZER_FILE),
+                map_location=self.config.learner_config.device,
             )
         )
         self.critic_optimizer.load_state_dict(
             torch.load(
-                os.path.join(self.config.checkpoint_load_folder, CRITIC_OPTIMIZER_FILE)
+                os.path.join(self.config.checkpoint_load_folder, CRITIC_OPTIMIZER_FILE),
+                map_location=self.config.learner_config.device,
             )
         )
         with open(
@@ -218,9 +259,11 @@ class PPOLearner(
         critic_before = torch.nn.utils.parameters_to_vector(self.critic.parameters())
 
         t1 = time.time()
-        for epoch in range(self.config.n_epochs):
+        for epoch in range(self.config.learner_config.n_epochs):
             # Get all shuffled batches from the experience buffer.
-            batches = exp.get_all_batches_shuffled(self.config.batch_size)
+            batches = exp.get_all_batches_shuffled(
+                self.config.learner_config.batch_size
+            )
             for batch in batches:
                 (
                     batch_agent_ids,
@@ -235,20 +278,29 @@ class PPOLearner(
                 self.critic_optimizer.zero_grad()
 
                 for minibatch_slice in range(
-                    0, self.config.batch_size, self.minibatch_size
+                    0, self.config.learner_config.batch_size, self.minibatch_size
                 ):
                     # Send everything to the device and enforce correct shapes.
                     start = minibatch_slice
-                    stop = min(start + self.minibatch_size, self.config.batch_size)
-                    minibatch_ratio = (stop - start) / self.config.batch_size
+                    stop = min(
+                        start + self.minibatch_size,
+                        self.config.learner_config.batch_size,
+                    )
+                    minibatch_ratio = (
+                        stop - start
+                    ) / self.config.learner_config.batch_size
 
                     agent_ids = batch_agent_ids[start:stop]
                     obs = batch_obs[start:stop]
                     acts = batch_acts[start:stop]
-                    advantages = batch_advantages[start:stop].to(self.config.device)
-                    old_probs = batch_old_probs[start:stop].to(self.config.device)
+                    advantages = batch_advantages[start:stop].to(
+                        self.config.learner_config.device
+                    )
+                    old_probs = batch_old_probs[start:stop].to(
+                        self.config.learner_config.device
+                    )
                     target_values = batch_target_values[start:stop].to(
-                        self.config.device
+                        self.config.learner_config.device
                     )
 
                     # Compute value estimates.
@@ -265,8 +317,8 @@ class PPOLearner(
                     ratio = torch.exp(log_probs - old_probs)
                     clipped = torch.clamp(
                         ratio,
-                        1.0 - self.config.clip_range,
-                        1.0 + self.config.clip_range,
+                        1.0 - self.config.learner_config.clip_range,
+                        1.0 + self.config.learner_config.clip_range,
                     )
 
                     # Compute KL divergence & clip fraction using SB3 method for reporting.
@@ -277,7 +329,10 @@ class PPOLearner(
 
                         # From the stable-baselines3 implementation of PPO.
                         clip_fraction = torch.mean(
-                            (torch.abs(ratio - 1) > self.config.clip_range).float()
+                            (
+                                torch.abs(ratio - 1)
+                                > self.config.learner_config.clip_range
+                            ).float()
                         ).to(device="cpu", non_blocking=True)
                         clip_fractions.append((clip_fraction, minibatch_ratio))
 
@@ -288,7 +343,9 @@ class PPOLearner(
                     value_loss = (
                         self.critic_loss_fn(vals, target_values) * minibatch_ratio
                     )
-                    ppo_loss = actor_loss - entropy * self.config.ent_coef
+                    ppo_loss = (
+                        actor_loss - entropy * self.config.learner_config.ent_coef
+                    )
 
                     ppo_loss.backward()
                     value_loss.backward()
@@ -315,7 +372,7 @@ class PPOLearner(
         actor_update_magnitude = (actor_before - actor_after).norm().cpu().item()
         critic_update_magnitude = (critic_before - critic_after).norm().cpu().item()
 
-        if self.config.device != "cpu":
+        if self.config.learner_config.device.type != "cpu":
             torch.cuda.current_stream().synchronize()
 
         tot_clip = sum(

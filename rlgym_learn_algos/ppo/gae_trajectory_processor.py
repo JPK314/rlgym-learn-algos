@@ -122,7 +122,7 @@ class GAETrajectoryProcessor(
             self._load_from_checkpoint()
         self.rust_gae_trajectory_processor.load(
             RustDerivedGAETrajectoryProcessorConfig(
-                self.gamma, self.lmbda, np.dtype(self.dtype)
+                self.gamma, self.lmbda, np.dtype(str(self.dtype)[6:])
             )
         )
 
