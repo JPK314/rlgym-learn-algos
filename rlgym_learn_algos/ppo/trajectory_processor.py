@@ -16,6 +16,7 @@ TRAJECTORY_PROCESSOR_FILE = "trajectory_processor.json"
 @dataclass
 class DerivedTrajectoryProcessorConfig(Generic[TrajectoryProcessorConfig]):
     trajectory_processor_config: TrajectoryProcessorConfig
+    agent_controller_name: str
     dtype: dtype
     device: device
     checkpoint_load_folder: Optional[str] = None

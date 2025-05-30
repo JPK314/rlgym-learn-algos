@@ -16,12 +16,13 @@ from rlgym.api import (
     ObsType,
     RewardType,
 )
+from torch import nn as nn
+
 from rlgym_learn_algos.util.torch_functions import get_device
 from rlgym_learn_algos.util.torch_pydantic import (
     PydanticTorchDevice,
     PydanticTorchDtype,
 )
-from torch import nn as nn
 
 from .actor import Actor
 from .critic import Critic
@@ -50,31 +51,10 @@ class PPOLearnerConfigModel(BaseModel, extra="forbid"):
         return data
 
 
-# @model_validator(mode="before")
-# @classmethod
-# def set_agent_controllers_config(cls, data):
-#     if isinstance(data, LearningCoordinatorConfigModel):
-#         agent_controllers_config = {}
-#         for k, v in data.agent_controllers_config.items():
-#             if isinstance(v, BaseModel):
-#                 agent_controllers_config[k] = v.model_dump()
-#             else:
-#                 agent_controllers_config[k] = v
-#         data.agent_controllers_config = agent_controllers_config
-#     elif isinstance(data, dict) and "agent_controllers_config" in data:
-#         agent_controllers_config = {}
-#         for k, v in data["agent_controllers_config"].items():
-#             if isinstance(v, BaseModel):
-#                 agent_controllers_config[k] = v.model_dump()
-#             else:
-#                 agent_controllers_config[k] = v
-#         data["agent_controllers_config"] = agent_controllers_config
-#     return data
-
-
 @dataclass
 class DerivedPPOLearnerConfig:
     learner_config: PPOLearnerConfigModel
+    agent_controller_name: str
     obs_space: ObsSpaceType
     action_space: ActionSpaceType
     checkpoint_load_folder: Optional[str] = None
@@ -155,16 +135,26 @@ class PPOLearner(
         total_parameters = actor_params_count + critic_params_count
 
         # Display in a structured manner
-        print("Trainable Parameters:")
-        print(f"{'Component':<10} {'Count':<10}")
+        print(f"{self.config.agent_controller_name}: Trainable Parameters:")
+        print(f"{self.config.agent_controller_name}: {'Component':<10} {'Count':<10}")
         print("-" * 20)
-        print(f"{'Policy':<10} {actor_params_count:<10}")
-        print(f"{'Critic':<10} {critic_params_count:<10}")
+        print(
+            f"{self.config.agent_controller_name}: {'Policy':<10} {actor_params_count:<10}"
+        )
+        print(
+            f"{self.config.agent_controller_name}: {'Critic':<10} {critic_params_count:<10}"
+        )
         print("-" * 20)
-        print(f"{'Total':<10} {total_parameters:<10}")
+        print(
+            f"{self.config.agent_controller_name}: {'Total':<10} {total_parameters:<10}"
+        )
 
-        print(f"Current Policy Learning Rate: {self.config.learner_config.actor_lr}")
-        print(f"Current Critic Learning Rate: {self.config.learner_config.critic_lr}")
+        print(
+            f"{self.config.agent_controller_name}: Current Policy Learning Rate: {self.config.learner_config.actor_lr}"
+        )
+        print(
+            f"{self.config.agent_controller_name}: Current Critic Learning Rate: {self.config.learner_config.critic_lr}"
+        )
         self.cumulative_model_updates = 0
 
         if self.config.checkpoint_load_folder is not None:
@@ -180,7 +170,7 @@ class PPOLearner(
 
         assert os.path.exists(
             self.config.checkpoint_load_folder
-        ), f"PPO Learner cannot find folder: {self.config.checkpoint_load_folder}"
+        ), f"{self.config.agent_controller_name}: PPO Learner cannot find folder: {self.config.checkpoint_load_folder}"
 
         self.actor.load_state_dict(
             torch.load(
@@ -206,11 +196,17 @@ class PPOLearner(
                 map_location=self.config.learner_config.device,
             )
         )
-        with open(
-            os.path.join(self.config.checkpoint_load_folder, MISC_STATE), "rt"
-        ) as f:
-            misc_state = json.load(f)
-            self.cumulative_model_updates = misc_state["cumulative_model_updates"]
+        try:
+            with open(
+                os.path.join(self.config.checkpoint_load_folder, MISC_STATE), "rt"
+            ) as f:
+                misc_state = json.load(f)
+                self.cumulative_model_updates = misc_state["cumulative_model_updates"]
+        except FileNotFoundError:
+            print(
+                f"{self.config.agent_controller_name}: Tried to load the PPO learner's misc state from the file at location {str(os.path.join(self.config.checkpoint_load_folder, MISC_STATE))}, but there is no such file! Miscellaneous stats will be initialized as if this were a new run instead."
+            )
+            self.cumulative_model_updates = 0
 
     def save_checkpoint(self, folder_path):
         os.makedirs(folder_path, exist_ok=True)

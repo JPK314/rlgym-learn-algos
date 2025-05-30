@@ -115,6 +115,7 @@ class GAETrajectoryProcessor(
         self.max_returns_per_stats_increment = (
             config.trajectory_processor_config.max_returns_per_stats_increment
         )
+        self.agent_controller_name = config.agent_controller_name
         self.dtype = config.dtype
         self.device = config.device
         self.checkpoint_load_folder = config.checkpoint_load_folder
@@ -127,12 +128,17 @@ class GAETrajectoryProcessor(
         )
 
     def _load_from_checkpoint(self):
-        with open(
-            os.path.join(self.checkpoint_load_folder, TRAJECTORY_PROCESSOR_FILE),
-            "rt",
-        ) as f:
-            state = json.load(f)
-        self.return_stats.load_state_dict(state["return_running_stats"])
+        try:
+            with open(
+                os.path.join(self.checkpoint_load_folder, TRAJECTORY_PROCESSOR_FILE),
+                "rt",
+            ) as f:
+                state = json.load(f)
+            self.return_stats.load_state_dict(state["return_running_stats"])
+        except FileNotFoundError:
+            print(
+                f"{self.agent_controller_name}: Tried to load trajectory processor from checkpoint using the trajectory processor file at location {str(os.path.join(self.checkpoint_load_folder, TRAJECTORY_PROCESSOR_FILE))}, but there is no such file! Running stats will be initialized as if this were a new run instead."
+            )
 
     def save_checkpoint(self, folder_path):
         state = {

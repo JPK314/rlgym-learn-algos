@@ -164,7 +164,10 @@ class WandbMetricsLogger(
                 self.run_id = None
         except FileNotFoundError:
             print(
-                f"{self.config.agent_controller_name}: Tried to load from checkpoint, but checkpoint didn't contain a wandb run! A new run will be created based on the config values."
+                f"{self.config.agent_controller_name}: Tried to load wandb run from checkpoint using the file at location {str(os.path.join(
+                    self.config.checkpoint_load_folder,
+                    self.checkpoint_file_name,
+                ))}, but there is no such file! A new run will be created based on the config values instead."
             )
             self.run_id = None
 

@@ -24,6 +24,8 @@ from rlgym.api import (
 )
 from rlgym_learn import EnvActionResponse, EnvActionResponseType, Timestep
 from rlgym_learn.api.agent_controller import AgentController
+from torch import device as _device
+
 from rlgym_learn_algos.logging import (
     DerivedMetricsLoggerConfig,
     MetricsLogger,
@@ -34,7 +36,6 @@ from rlgym_learn_algos.logging import (
 )
 from rlgym_learn_algos.stateful_functions import ObsStandardizer
 from rlgym_learn_algos.util.torch_functions import get_device
-from torch import device as _device
 
 from .actor import Actor
 from .critic import Critic
@@ -253,6 +254,7 @@ class PPOAgentController(
         self.learner.load(
             DerivedPPOLearnerConfig(
                 learner_config=learner_config,
+                agent_controller_name=config.agent_controller_name,
                 obs_space=self.obs_space,
                 action_space=self.action_space,
                 checkpoint_load_folder=learner_checkpoint_load_folder,
@@ -304,33 +306,60 @@ class PPOAgentController(
         random.seed(self.config.base_config.random_seed)
 
     def _load_from_checkpoint(self):
-        with open(
-            os.path.join(
-                self.config.agent_controller_config.checkpoint_load_folder,
-                CURRENT_TRAJECTORIES_FILE,
-            ),
-            "rb",
-        ) as f:
-            current_trajectories: Dict[
-                int,
-                EnvTrajectories[AgentID, ActionType, ObsType, RewardType],
-            ] = pickle.load(f)
-        with open(
-            os.path.join(
-                self.config.agent_controller_config.checkpoint_load_folder,
-                ITERATION_SHARED_INFOS_FILE,
-            ),
-            "rb",
-        ) as f:
-            iteration_shared_infos: List[Dict[str, Any]] = pickle.load(f)
-        with open(
-            os.path.join(
-                self.config.agent_controller_config.checkpoint_load_folder,
-                PPO_AGENT_FILE,
-            ),
-            "rt",
-        ) as f:
-            state = json.load(f)
+        try:
+            with open(
+                os.path.join(
+                    self.config.agent_controller_config.checkpoint_load_folder,
+                    CURRENT_TRAJECTORIES_FILE,
+                ),
+                "rb",
+            ) as f:
+                current_trajectories: Dict[
+                    int,
+                    EnvTrajectories[AgentID, ActionType, ObsType, RewardType],
+                ] = pickle.load(f)
+        except FileNotFoundError:
+            print(f"{self.config.agent_controller_name}: Tried to load current trajectories from checkpoint using the file at location {str(os.path.join(
+                    self.config.agent_controller_config.checkpoint_load_folder,
+                    CURRENT_TRAJECTORIES_FILE,
+                ))}, but there is no such file! Current trajectories will be initialized as an empty dict instead.")
+            current_trajectories = {}
+        try:
+            with open(
+                os.path.join(
+                    self.config.agent_controller_config.checkpoint_load_folder,
+                    ITERATION_SHARED_INFOS_FILE,
+                ),
+                "rb",
+            ) as f:
+                iteration_shared_infos: List[Dict[str, Any]] = pickle.load(f)
+        except FileNotFoundError:
+            print(f"{self.config.agent_controller_name}: Tried to load iteration shared info data from checkpoint using the file at location {str(os.path.join(
+                    self.config.agent_controller_config.checkpoint_load_folder,
+                    ITERATION_SHARED_INFOS_FILE,
+                ))}, but there is no such file! Iteration shared info data will be initialized as an empty list instead.")
+            current_trajectories = {}
+        try:
+            with open(
+                os.path.join(
+                    self.config.agent_controller_config.checkpoint_load_folder,
+                    PPO_AGENT_FILE,
+                ),
+                "rt",
+            ) as f:
+                state = json.load(f)
+        except FileNotFoundError:
+            print(f"{self.config.agent_controller_name}: Tried to load PPO agent miscellaneous state data from checkpoint using the file at location {str(os.path.join(
+                    self.config.agent_controller_config.checkpoint_load_folder,
+                    PPO_AGENT_FILE,
+                ))}, but there is no such file! This state data will be initialized as if this were a new run instead.")
+            state = {
+                "cur_iteration": 0,
+                "iteration_timesteps": 0,
+                "cumulative_timesteps": 0,
+                "iteration_start_time": time.perf_counter(),
+                "timestep_collection_start_time": time.perf_counter(),
+            }
 
         self.current_trajectories = current_trajectories
         self.iteration_shared_infos = iteration_shared_infos

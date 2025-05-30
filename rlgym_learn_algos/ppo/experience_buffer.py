@@ -45,17 +45,6 @@ class ExperienceBufferConfigModel(BaseModel, extra="forbid"):
                 data["device"] = get_device("auto")
         return data
 
-    # device: PydanticTorchDevice = "auto"
-
-    # @model_validator(mode="before")
-    # @classmethod
-    # def set_device(cls, data):
-    #     if isinstance(data, dict) and (
-    #         "device" not in data or data["device"] == "auto"
-    #     ):
-    #         data["device"] = get_device("auto")
-    #     return data
-
 
 @dataclass
 class DerivedExperienceBufferConfig:
@@ -171,7 +160,7 @@ class ExperienceBuffer(
             self.advantages = state_dict["advantages"]
         except FileNotFoundError:
             print(
-                f"{self.config.agent_controller_name}: Tried to load from checkpoint, but checkpoint didn't contain a saved experience buffer! A blank experience buffer will be used instead."
+                f"{self.config.agent_controller_name}: Tried to load experience buffer from checkpoint using the file at location {str(os.path.join(self.config.checkpoint_load_folder, EXPERIENCE_BUFFER_FILE))}, but there is no such file! A blank experience buffer will be used instead."
             )
 
     def save_checkpoint(self, folder_path):
