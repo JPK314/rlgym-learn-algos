@@ -7,7 +7,6 @@ import numpy as np
 import torch
 from pydantic import BaseModel, Field, model_validator
 from rlgym.api import ActionType, AgentID, ObsType, RewardType
-
 from rlgym_learn_algos.util.torch_functions import get_device
 from rlgym_learn_algos.util.torch_pydantic import PydanticTorchDevice
 
@@ -128,6 +127,7 @@ class ExperienceBuffer(
         self.trajectory_processor.load(
             DerivedTrajectoryProcessorConfig(
                 trajectory_processor_config=trajectory_processor_config,
+                agent_controller_name=config.agent_controller_name,
                 dtype=config.dtype,
                 device=config.learner_device,
             )
