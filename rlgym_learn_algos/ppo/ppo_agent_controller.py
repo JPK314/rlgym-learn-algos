@@ -24,6 +24,9 @@ from rlgym.api import (
 )
 from rlgym_learn import EnvActionResponse, EnvActionResponseType, Timestep
 from rlgym_learn.api.agent_controller import AgentController
+from tensordict import TensorDict
+from torch import device as _device
+
 from rlgym_learn_algos.logging import (
     DerivedMetricsLoggerConfig,
     MetricsLogger,
@@ -33,8 +36,6 @@ from rlgym_learn_algos.logging import (
     WandbMetricsLogger,
 )
 from rlgym_learn_algos.stateful_functions import ObsStandardizer
-from rlgym_learn_algos.util.torch_functions import get_device
-from torch import device as _device
 
 from .actor import Actor
 from .critic import Critic
@@ -109,7 +110,7 @@ class PPOAgentController(
         StateType,
         ObsSpaceType,
         ActionSpaceType,
-        torch.Tensor,
+        TensorDict,
         PPOAgentControllerData[TrajectoryProcessorData],
     ],
     Generic[
@@ -453,7 +454,7 @@ class PPOAgentController(
         shared_infos: List[Dict[str, Any]] = []
         for env_id, (
             env_timesteps,
-            env_log_probs,
+            env_aald,
             env_shared_info,
             _,
         ) in timestep_data.items():
@@ -466,7 +467,7 @@ class PPOAgentController(
                         self.agent_choice_fn,
                     )
                 timesteps_added += self.current_env_trajectories[env_id].add_steps(
-                    env_timesteps, env_log_probs
+                    env_timesteps, env_aald
                 )
             shared_infos.append(env_shared_info)
         self.iteration_timesteps += timesteps_added

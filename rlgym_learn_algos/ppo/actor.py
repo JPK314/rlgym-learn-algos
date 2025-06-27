@@ -3,6 +3,7 @@ from typing import Generic, Iterable, List, Tuple
 
 import torch.nn as nn
 from rlgym.api import ActionType, AgentID, ObsType
+from tensordict import TensorDict
 from torch import Tensor
 
 
@@ -13,7 +14,7 @@ class Actor(nn.Module, Generic[AgentID, ObsType, ActionType]):
     @abstractmethod
     def get_action(
         self, agent_id_list: List[AgentID], obs_list: List[ObsType], **kwargs
-    ) -> Tuple[Iterable[ActionType], Tensor]:
+    ) -> Tuple[Iterable[ActionType], TensorDict]:
         """
         Function to get an action and the log of its probability from the policy given an observation.
         :param agent_id_list: List of AgentIDs for which to produce actions. AgentIDs may not be unique here. Parallel with obs_list.
@@ -26,8 +27,8 @@ class Actor(nn.Module, Generic[AgentID, ObsType, ActionType]):
     def get_backprop_data(
         self,
         agent_id_list: List[AgentID],
-        obs_list: List[ObsType],
-        acts: List[ActionType],
+        obs: Tensor,
+        action: Tensor,
         **kwargs,
     ) -> Tuple[Tensor, Tensor]:
         """
