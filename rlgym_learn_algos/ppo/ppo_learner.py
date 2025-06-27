@@ -39,6 +39,7 @@ class PPOLearnerConfigModel(BaseModel, extra="forbid"):
     clip_range: float = 0.2
     actor_lr: float = 3e-4
     critic_lr: float = 3e-4
+    advantage_normalization: bool = True
     device: PydanticTorchDevice = "auto"
 
     @model_validator(mode="before")
@@ -292,6 +293,8 @@ class PPOLearner(
                     advantages = batch_advantages[start:stop].to(
                         self.config.learner_config.device
                     )
+                    if self.config.learner_config.advantage_normalization:
+                        advantages = (advantages - torch.mean(advantages)) / (torch.std(advantages) + 1e-8)
                     old_probs = batch_old_probs[start:stop].to(
                         self.config.learner_config.device
                     )

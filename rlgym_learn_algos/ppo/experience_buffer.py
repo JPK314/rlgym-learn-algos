@@ -7,6 +7,7 @@ import numpy as np
 import torch
 from pydantic import BaseModel, Field, model_validator
 from rlgym.api import ActionType, AgentID, ObsType, RewardType
+
 from rlgym_learn_algos.util.torch_functions import get_device
 from rlgym_learn_algos.util.torch_pydantic import PydanticTorchDevice
 
@@ -24,6 +25,7 @@ EXPERIENCE_BUFFER_FILE = "experience_buffer.pkl"
 class ExperienceBufferConfigModel(BaseModel, extra="forbid"):
     max_size: int = 100000
     device: PydanticTorchDevice = "auto"
+    save_experience_buffer_in_checkpoint: bool = True
     trajectory_processor_config: Dict[str, Any] = Field(default_factory=dict)
 
     @model_validator(mode="before")
@@ -165,21 +167,22 @@ class ExperienceBuffer(
 
     def save_checkpoint(self, folder_path):
         os.makedirs(folder_path, exist_ok=True)
-        with open(
-            os.path.join(folder_path, EXPERIENCE_BUFFER_FILE),
-            "wb",
-        ) as f:
-            pickle.dump(
-                {
-                    "agent_ids": self.agent_ids,
-                    "observations": self.observations,
-                    "actions": self.actions,
-                    "log_probs": self.log_probs,
-                    "values": self.values,
-                    "advantages": self.advantages,
-                },
-                f,
-            )
+        if self.config.experience_buffer_config.save_experience_buffer_in_checkpoint:
+            with open(
+                os.path.join(folder_path, EXPERIENCE_BUFFER_FILE),
+                "wb",
+            ) as f:
+                pickle.dump(
+                    {
+                        "agent_ids": self.agent_ids,
+                        "observations": self.observations,
+                        "actions": self.actions,
+                        "log_probs": self.log_probs,
+                        "values": self.values,
+                        "advantages": self.advantages,
+                    },
+                    f,
+                )
         self.trajectory_processor.save_checkpoint(folder_path)
 
     # TODO: update docs
