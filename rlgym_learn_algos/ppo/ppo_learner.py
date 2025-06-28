@@ -41,15 +41,22 @@ class PPOLearnerConfigModel(BaseModel, extra="forbid"):
     critic_lr: float = 3e-4
     advantage_normalization: bool = True
     device: PydanticTorchDevice = "auto"
+    cudnn_benchmark_mode: bool = True
 
     @model_validator(mode="before")
     @classmethod
     def set_device(cls, data):
-        if isinstance(data, dict) and (
-            "device" not in data or data["device"] == "auto"
-        ):
-            data["device"] = get_device("auto")
+        if isinstance(data, dict):
+            if "device" not in data:
+                data["device"] = "auto"
+            data["device"] = get_device(data["device"])
         return data
+
+    @model_validator(mode="after")
+    def validate_cudnn_benchmark(self):
+        if self.device.type != "cuda":
+            self.cudnn_benchmark_mode = False
+        return self
 
 
 @dataclass
@@ -107,6 +114,12 @@ class PPOLearner(
 
     def load(self, config: DerivedPPOLearnerConfig):
         self.config = config
+
+        if (
+            config.learner_config.cudnn_benchmark_mode
+            and config.learner_config.device.type == "cuda"
+        ):
+            torch.backends.cudnn.benchmark = True
 
         self.actor = self.actor_factory(
             config.obs_space, config.action_space, config.learner_config.device
@@ -294,7 +307,9 @@ class PPOLearner(
                         self.config.learner_config.device
                     )
                     if self.config.learner_config.advantage_normalization:
-                        advantages = (advantages - torch.mean(advantages)) / (torch.std(advantages) + 1e-8)
+                        advantages = (advantages - torch.mean(advantages)) / (
+                            torch.std(advantages) + 1e-8
+                        )
                     old_probs = batch_old_probs[start:stop].to(
                         self.config.learner_config.device
                     )

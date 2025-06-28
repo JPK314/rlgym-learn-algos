@@ -13,7 +13,6 @@ import torch.nn as nn
 
 def get_device(device: str):
     if device in ["auto", "gpu"] and torch.cuda.is_available():
-        torch.backends.cudnn.benchmark = True
         return "cuda:0"
     elif device == "auto" and not torch.cuda.is_available():
         return "cpu"
