@@ -42,8 +42,9 @@ class ExperienceBufferConfigModel(BaseModel, extra="forbid"):
                     data["trajectory_processor_config"] = data[
                         "trajectory_processor_config"
                     ].model_dump()
-            if "device" not in data or data["device"] == "auto":
-                data["device"] = get_device("auto")
+            if "device" not in data:
+                data["device"] = "auto"
+            data["device"] = get_device(data["device"])
         return data
 
 
