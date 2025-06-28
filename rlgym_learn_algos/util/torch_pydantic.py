@@ -42,7 +42,7 @@ device_str_regex = (
             "privateuseone",
         ]
     )
-    + ")(:\d+)"
+    + ")(:\d+)?"
 )
 
 
