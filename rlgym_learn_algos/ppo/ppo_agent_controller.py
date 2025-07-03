@@ -24,6 +24,8 @@ from rlgym.api import (
 )
 from rlgym_learn import EnvActionResponse, EnvActionResponseType, Timestep
 from rlgym_learn.api.agent_controller import AgentController
+from torch import device as _device
+
 from rlgym_learn_algos.logging import (
     DerivedMetricsLoggerConfig,
     MetricsLogger,
@@ -34,7 +36,6 @@ from rlgym_learn_algos.logging import (
 )
 from rlgym_learn_algos.stateful_functions import ObsStandardizer
 from rlgym_learn_algos.util.torch_functions import get_device
-from torch import device as _device
 
 from .actor import Actor
 from .critic import Critic
@@ -57,8 +58,8 @@ EXPERIENCE_BUFFER_FOLDER = "experience_buffer"
 PPO_LEARNER_FOLDER = "ppo_learner"
 METRICS_LOGGER_FOLDER = "metrics_logger"
 PPO_AGENT_FILE = "ppo_agent.json"
+ITERATION_TRAJECTORIES_FILE = "current_trajectories.pkl"  # this should be renamed, but it would be a breaking change so I'm leaving it until I happen to make one of those and remember to update this at the same time
 ITERATION_SHARED_INFOS_FILE = "iteration_shared_infos.pkl"
-CURRENT_TRAJECTORIES_FILE = "current_trajectories.pkl"
 
 
 class PPOAgentControllerConfigModel(BaseModel, extra="forbid"):
@@ -68,6 +69,7 @@ class PPOAgentControllerConfigModel(BaseModel, extra="forbid"):
     checkpoint_load_folder: Optional[str] = None
     n_checkpoints_to_keep: int = 5
     random_seed: int = 123
+    save_mid_iteration_data_in_checkpoint = True
     learner_config: PPOLearnerConfigModel = Field(default_factory=PPOLearnerConfigModel)
     experience_buffer_config: ExperienceBufferConfigModel = Field(
         default_factory=ExperienceBufferConfigModel
@@ -166,7 +168,7 @@ class PPOAgentController(
             str,
             EnvTrajectories[AgentID, ActionType, ObsType, RewardType],
         ] = {}
-        self.current_trajectories: List[
+        self.iteration_trajectories: List[
             Trajectory[AgentID, ActionType, ObsType, RewardType]
         ] = []
         self.iteration_shared_infos: List[Dict[str, Any]] = []
@@ -309,19 +311,18 @@ class PPOAgentController(
             with open(
                 os.path.join(
                     self.config.agent_controller_config.checkpoint_load_folder,
-                    CURRENT_TRAJECTORIES_FILE,
+                    ITERATION_TRAJECTORIES_FILE,
                 ),
                 "rb",
             ) as f:
-                current_trajectories: Dict[
-                    int,
-                    EnvTrajectories[AgentID, ActionType, ObsType, RewardType],
+                iteration_trajectories: List[
+                    Trajectory[AgentID, ObsType, ActionType, RewardType]
                 ] = pickle.load(f)
         except FileNotFoundError:
             print(
-                f"{self.config.agent_controller_name}: Tried to load current trajectories from checkpoint using the file at location {str(os.path.join(self.config.agent_controller_config.checkpoint_load_folder, CURRENT_TRAJECTORIES_FILE))}, but there is no such file! Current trajectories will be initialized as an empty dict instead."
+                f"{self.config.agent_controller_name}: Tried to load current trajectories from checkpoint using the file at location {str(os.path.join(self.config.agent_controller_config.checkpoint_load_folder, ITERATION_TRAJECTORIES_FILE))}, but there is no such file! Current trajectories will be initialized as an empty list instead."
             )
-            current_trajectories = {}
+            iteration_trajectories = []
         try:
             with open(
                 os.path.join(
@@ -335,7 +336,7 @@ class PPOAgentController(
             print(
                 f"{self.config.agent_controller_name}: Tried to load iteration shared info data from checkpoint using the file at location {str(os.path.join(self.config.agent_controller_config.checkpoint_load_folder, ITERATION_SHARED_INFOS_FILE))}, but there is no such file! Iteration shared info data will be initialized as an empty list instead."
             )
-            current_trajectories = {}
+            iteration_shared_infos = []
         try:
             with open(
                 os.path.join(
@@ -357,7 +358,7 @@ class PPOAgentController(
                 "timestep_collection_start_time": time.perf_counter(),
             }
 
-        self.current_trajectories = current_trajectories
+        self.iteration_trajectories = iteration_trajectories
         self.iteration_shared_infos = iteration_shared_infos
         self.cur_iteration = state["cur_iteration"]
         self.iteration_timesteps = state["iteration_timesteps"]
@@ -379,20 +380,22 @@ class PPOAgentController(
         self.experience_buffer.save_checkpoint(
             os.path.join(checkpoint_save_folder, EXPERIENCE_BUFFER_FOLDER)
         )
-        self.metrics_logger.save_checkpoint(
-            os.path.join(checkpoint_save_folder, METRICS_LOGGER_FOLDER)
-        )
+        if self.metrics_logger is not None:
+            self.metrics_logger.save_checkpoint(
+                os.path.join(checkpoint_save_folder, METRICS_LOGGER_FOLDER)
+            )
 
-        with open(
-            os.path.join(checkpoint_save_folder, CURRENT_TRAJECTORIES_FILE),
-            "wb",
-        ) as f:
-            pickle.dump(self.current_trajectories, f)
-        with open(
-            os.path.join(checkpoint_save_folder, ITERATION_SHARED_INFOS_FILE),
-            "wb",
-        ) as f:
-            pickle.dump(self.iteration_shared_infos, f)
+        if self.config.agent_controller_config.save_mid_iteration_data_in_checkpoint:
+            with open(
+                os.path.join(checkpoint_save_folder, ITERATION_TRAJECTORIES_FILE),
+                "wb",
+            ) as f:
+                pickle.dump(self.iteration_trajectories, f)
+            with open(
+                os.path.join(checkpoint_save_folder, ITERATION_SHARED_INFOS_FILE),
+                "wb",
+            ) as f:
+                pickle.dump(self.iteration_shared_infos, f)
         with open(os.path.join(checkpoint_save_folder, PPO_AGENT_FILE), "wt") as f:
             state = {
                 "cur_iteration": self.cur_iteration,
@@ -403,6 +406,7 @@ class PPOAgentController(
             }
             json.dump(state, f, indent=4)
 
+        # TODO: does this actually work? I'm not sure the file structure I'm using actually works with this assumption
         # Prune old checkpoints
         existing_checkpoints = [
             int(arg) for arg in os.listdir(self.checkpoints_save_folder)
@@ -506,7 +510,7 @@ class PPOAgentController(
             elif enum_type == EnvActionResponseType.RESET:
                 env_trajectories = self.current_env_trajectories.pop(env_id)
                 env_trajectories.finalize()
-                self.current_trajectories += env_trajectories.get_trajectories()
+                self.iteration_trajectories += env_trajectories.get_trajectories()
             elif enum_type == EnvActionResponseType.SET_STATE:
                 # Can get the desired_state using env_action.desired_state and the prev_timestep_id_dict using env_action.prev_timestep_id_dict, but I'll leave that to you
                 raise NotImplementedError
@@ -517,10 +521,10 @@ class PPOAgentController(
         env_trajectories_list = list(self.current_env_trajectories.values())
         for env_trajectories in env_trajectories_list:
             env_trajectories.finalize()
-            self.current_trajectories += env_trajectories.get_trajectories()
+            self.iteration_trajectories += env_trajectories.get_trajectories()
         self._update_value_predictions()
         trajectory_processor_data = self.experience_buffer.submit_experience(
-            self.current_trajectories
+            self.iteration_trajectories
         )
         ppo_data = self.learner.learn(self.experience_buffer)
 
@@ -540,9 +544,9 @@ class PPOAgentController(
             self.metrics_logger.collect_env_metrics(self.iteration_shared_infos)
             self.metrics_logger.report_metrics()
 
-        self.iteration_shared_infos = []
+        self.iteration_trajectories.clear()
+        self.iteration_shared_infos.clear()
         self.current_env_trajectories.clear()
-        self.current_trajectories.clear()
         self.ts_since_last_save += self.iteration_timesteps
         self.iteration_timesteps = 0
         self.iteration_start_time = cur_time
@@ -551,14 +555,14 @@ class PPOAgentController(
     @torch.no_grad()
     def _update_value_predictions(self):
         """
-        Function to update the value predictions inside the Trajectory instances of self.current_trajectories
+        Function to update the value predictions inside the Trajectory instances of self.iteration_trajectories
         """
         traj_timestep_idx_ranges: List[Tuple[int, int]] = []
         start = 0
         stop = 0
         critic_agent_id_input: List[AgentID] = []
         critic_obs_input: List[ObsType] = []
-        for trajectory in self.current_trajectories:
+        for trajectory in self.iteration_trajectories:
             obs_list = trajectory.obs_list + [trajectory.final_obs]
             traj_len = len(obs_list)
             agent_id_list = [trajectory.agent_id] * traj_len
@@ -575,7 +579,7 @@ class PPOAgentController(
         )
         torch.cuda.empty_cache()
         for idx, (start, stop) in enumerate(traj_timestep_idx_ranges):
-            self.current_trajectories[idx].val_preds = val_preds[start : stop - 1]
-            self.current_trajectories[idx].final_val_pred = val_preds[stop - 1]
+            self.iteration_trajectories[idx].val_preds = val_preds[start : stop - 1]
+            self.iteration_trajectories[idx].final_val_pred = val_preds[stop - 1]
         if self.config.agent_controller_config.learner_config.device.type != "cpu":
             torch.cuda.current_stream().synchronize()
