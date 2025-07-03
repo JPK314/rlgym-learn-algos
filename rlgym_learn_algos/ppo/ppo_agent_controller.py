@@ -69,7 +69,7 @@ class PPOAgentControllerConfigModel(BaseModel, extra="forbid"):
     checkpoint_load_folder: Optional[str] = None
     n_checkpoints_to_keep: int = 5
     random_seed: int = 123
-    save_mid_iteration_data_in_checkpoint = True
+    save_mid_iteration_data_in_checkpoint: bool = True
     learner_config: PPOLearnerConfigModel = Field(default_factory=PPOLearnerConfigModel)
     experience_buffer_config: ExperienceBufferConfigModel = Field(
         default_factory=ExperienceBufferConfigModel
