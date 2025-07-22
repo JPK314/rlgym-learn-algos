@@ -117,14 +117,17 @@ class GAETrajectoryProcessorPurePython(
         else:
             avg_return = np.nan
             return_std = np.nan
-        avg_reward = reward_sum[0] / exp_len
+        avg_reward = reward_sum.item() / exp_len
+        average_episode_return = reward_sum.item() / len(trajectories)
         trajectory_processor_data = GAETrajectoryProcessorData(
-            average_undiscounted_episodic_return=avg_reward,
+            average_undiscounted_episodic_return=average_episode_return,
             average_return=avg_return,
             return_standard_deviation=return_std,
+            average_reward=avg_reward
         )
         return (
             (
+                agent_ids,
                 observations,
                 actions,
                 torch.stack(log_probs_list).to(device=self.device),
@@ -146,7 +149,7 @@ class GAETrajectoryProcessorPurePython(
         self.max_returns_per_stats_increment = (
             config.trajectory_processor_config.max_returns_per_stats_increment
         )
-        self.dtype = np.dtype(config.dtype)
+        self.dtype = np.dtype(str(config.dtype).replace("torch.", ""))
         self.device = config.device
         self.checkpoint_load_folder = config.checkpoint_load_folder
         if self.checkpoint_load_folder is not None:
