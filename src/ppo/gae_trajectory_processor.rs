@@ -73,7 +73,11 @@ macro_rules! define_process_trajectories {
                 for trajectory in trajectories.into_iter() {
                     let trajectory_len = trajectory.obs_list.len();
                     let mut cur_return = 0 as $dtype;
-                    let mut next_val_pred = trajectory.final_val_pred.extract::<$dtype>()?;
+                    let mut next_val_pred = if trajectory.truncated {
+                        trajectory.final_val_pred.extract::<$dtype>()?
+                    } else {
+                        0 as $dtype
+                    };
                     let mut cur_advantage = 0 as $dtype;
                     let timesteps_rewards = batch_reward_type_numpy_converter
                         .call_method1(intern!(py, "as_numpy"), (&trajectory.reward_list,))?
