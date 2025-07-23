@@ -284,6 +284,15 @@ class PPOLearner(
                     batch_advantages,
                 ) = batch
                 batch_target_values = batch_values + batch_advantages
+                if self.config.learner_config.advantage_normalization:
+                    old_device = batch_advantages.device
+                    batch_advantages = batch_advantages.to(
+                        self.config.learner_config.device
+                    )
+                    std, mean = torch.std_mean(batch_advantages)
+                    batch_advantages = (batch_advantages - mean) / (std + 1e-8)
+                    batch_advantages = batch_advantages.to(old_device)
+
                 self.actor_optimizer.zero_grad()
                 self.critic_optimizer.zero_grad()
 
@@ -306,10 +315,6 @@ class PPOLearner(
                     advantages = batch_advantages[start:stop].to(
                         self.config.learner_config.device
                     )
-                    if self.config.learner_config.advantage_normalization:
-                        advantages = (advantages - torch.mean(advantages)) / (
-                            torch.std(advantages) + 1e-8
-                        )
                     old_probs = batch_old_probs[start:stop].to(
                         self.config.learner_config.device
                     )
