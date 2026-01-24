@@ -99,6 +99,9 @@ class PPOAgentControllerData(Generic[TrajectoryProcessorData]):
     iteration_time: float
     timesteps_collected: int
     timestep_collection_time: float
+    natural_episode_length_mean: float
+    natural_episode_length_median: float
+    percent_truncated: float
 
 
 class PPOAgentController(
@@ -179,6 +182,9 @@ class PPOAgentController(
         self.iteration_start_time = cur_time
         self.timestep_collection_start_time = cur_time
         self.ts_since_last_save = 0
+        self.iteration_total_episodes = 0
+        self.iteration_truncated_episodes = 0
+        self.iteration_natural_episode_lengths: List[int] = []
 
     def set_space_types(self, obs_space, action_space):
         self.obs_space = obs_space
@@ -497,6 +503,15 @@ class PPOAgentController(
             done = all(self.current_env_trajectories[env_id].dones.values())
             if done:
                 env_action_responses[env_id] = EnvActionResponse.RESET()
+                is_truncated = any(self.current_env_trajectories[env_id].truncateds.values())
+                if is_truncated:
+                    self.iteration_truncated_episodes += 1
+                episode_length = sum(
+                    len(obs_list) 
+                    for obs_list in self.current_env_trajectories[env_id].obs_lists.values()
+                )
+                self.iteration_natural_episode_lengths.append(episode_length)
+                self.iteration_total_episodes += 1
             else:
                 env_action_responses[env_id] = EnvActionResponse.STEP()
         return env_action_responses
@@ -528,6 +543,17 @@ class PPOAgentController(
         )
         ppo_data = self.learner.learn(self.experience_buffer)
 
+        if self.iteration_natural_episode_lengths:
+            natural_lengths_array = np.array(self.iteration_natural_episode_lengths, dtype=np.int64)
+            natural_episode_length_mean = float(natural_lengths_array.mean())
+            natural_episode_length_median = float(np.median(natural_lengths_array))
+        else:
+            natural_episode_length_mean = 0.0
+            natural_episode_length_median = 0.0
+            print(f"{self.config.agent_controller_name}: No natural episode endings this iteration")
+
+        percent_truncated = self.iteration_truncated_episodes / (self.iteration_total_episodes + 1e-10)
+
         cur_time = time.perf_counter()
         if self.metrics_logger is not None:
             self.metrics_logger.collect_agent_metrics(
@@ -539,6 +565,9 @@ class PPOAgentController(
                     self.iteration_timesteps,
                     self.timestep_collection_end_time
                     - self.timestep_collection_start_time,
+                    natural_episode_length_mean,
+                    natural_episode_length_median,
+                    percent_truncated,
                 )
             )
             self.metrics_logger.collect_env_metrics(self.iteration_shared_infos)
@@ -551,6 +580,9 @@ class PPOAgentController(
         self.iteration_timesteps = 0
         self.iteration_start_time = cur_time
         self.timestep_collection_start_time = time.perf_counter()
+        self.iteration_total_episodes = 0
+        self.iteration_truncated_episodes = 0
+        self.iteration_natural_episode_lengths.clear()
 
     @torch.no_grad()
     def _update_value_predictions(self):

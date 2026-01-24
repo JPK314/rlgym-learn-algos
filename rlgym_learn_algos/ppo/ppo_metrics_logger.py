@@ -58,6 +58,9 @@ class PPOMetricsLogger(
                 "SB3 Clip Fraction": data.ppo_data.sb3_clip_fraction,
                 "Actor Update Magnitude": data.ppo_data.actor_update_magnitude,
                 "Critic Update Magnitude": data.ppo_data.critic_update_magnitude,
+                "Natural Episode Length Mean": data.natural_episode_length_mean,
+                "Natural Episode Length Median": data.natural_episode_length_median,
+                "Percent Truncated": data.percent_truncated,
             },
         }
 
