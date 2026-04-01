@@ -1,10 +1,10 @@
 from abc import abstractmethod
-from typing import Any, Dict, Generic, List
+from typing import Any, Dict, Generic
 
 from rlgym_learn.api import AgentControllerData
 
 from .metrics_logger import (
-    DerivedMetricsLoggerConfig,
+    MetricsLogger,
     MetricsLoggerAdditionalDerivedConfig,
     MetricsLoggerConfig,
 )
@@ -35,17 +35,16 @@ class DictMetricsLogger(
         MetricsLoggerConfig,
         MetricsLoggerAdditionalDerivedConfig,
         AgentControllerData,
+    ],
+    MetricsLogger[
+        MetricsLoggerConfig,
+        MetricsLoggerAdditionalDerivedConfig,
+        AgentControllerData
     ]
 ):
     """
     This is a specification of the MetricsLogger which provides an additional method get_metrics to retrieve the metrics as a dictionary.
     """
-
-    def collect_env_metrics(self, data: List[Dict[str, Any]]):
-        pass
-
-    def collect_agent_metrics(self, data: AgentControllerData):
-        pass
 
     @abstractmethod
     def get_metrics(self) -> Dict[str, Any]:
@@ -56,18 +55,3 @@ class DictMetricsLogger(
 
     def report_metrics(self):
         print_dict(self.get_metrics())
-
-    @abstractmethod
-    def validate_config(self, config_obj: Dict[str, Any]) -> MetricsLoggerConfig:
-        raise NotImplementedError
-
-    def load(
-        self,
-        config: DerivedMetricsLoggerConfig[
-            MetricsLoggerConfig, MetricsLoggerAdditionalDerivedConfig
-        ],
-    ):
-        pass
-
-    def save_checkpoint(self, folder_path):
-        pass
