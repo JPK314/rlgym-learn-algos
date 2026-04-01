@@ -1,5 +1,6 @@
 from abc import abstractmethod
 from dataclasses import dataclass
+from os import PathLike
 from typing import Any, Dict, Generic, List, Optional, TypeVar
 
 from rlgym_learn.api import AgentControllerData
@@ -80,7 +81,7 @@ class MetricsLogger(
         """
         pass
 
-    def save_checkpoint(self, folder_path, file_name):
+    def save_checkpoint(self, folder_path: str | PathLike[str]):
         """
         Saves data inside this instance which needs to be checkpointed.
         """
