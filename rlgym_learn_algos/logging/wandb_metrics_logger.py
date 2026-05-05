@@ -38,6 +38,7 @@ class WandbMetricsLoggerConfigModel(BaseModel, extra="forbid"):
     new_run_with_timestamp_suffix: bool = False
     additional_wandb_run_config: Dict[str, Any] = Field(default_factory=dict)
     settings_kwargs: Dict[str, Any] = Field(default_factory=dict)
+    inner_metrics_logger_config: InnerMetricsLoggerConfig | None = None
 
 
 @dataclass
@@ -46,10 +47,7 @@ class WandbAdditionalDerivedConfig(
 ):
     derived_wandb_run_config: Dict[str, Any] = Field(default_factory=dict)
     timestamp_suffix: Optional[str] = None
-    inner_metrics_logger_config: InnerMetricsLoggerConfig = None
-    inner_metrics_logger_additional_derived_config: (
-        InnerMetricsLoggerAdditionalDerivedConfig
-    ) = None
+    inner_metrics_logger_additional_derived_config: InnerMetricsLoggerAdditionalDerivedConfig = None
 
 
 class WandbMetricsLogger(
@@ -90,7 +88,12 @@ class WandbMetricsLogger(
         self.inner_metrics_logger.report_metrics()
 
     def validate_config(self, config_obj: Any):
-        return WandbMetricsLoggerConfigModel.model_validate(config_obj)
+        _config = WandbMetricsLoggerConfigModel.model_validate(config_obj)
+
+        _config.inner_metrics_logger_config = self.inner_metrics_logger.validate_config(
+            config_obj["inner_metrics_logger_config"]
+        )
+        return _config
 
     def load(self, config):
         self.config = config
@@ -98,7 +101,7 @@ class WandbMetricsLogger(
             DerivedMetricsLoggerConfig(
                 checkpoint_load_folder=config.checkpoint_load_folder,
                 agent_controller_name=config.agent_controller_name,
-                metrics_logger_config=config.additional_derived_config.inner_metrics_logger_config,
+                metrics_logger_config=config.metrics_logger_config.inner_metrics_logger_config,
                 additional_derived_config=config.additional_derived_config.inner_metrics_logger_additional_derived_config,
             )
         )
