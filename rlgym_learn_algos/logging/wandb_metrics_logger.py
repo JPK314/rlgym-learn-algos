@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from typing import Any, Dict, Generic, List, Optional, TypeVar
 
 import wandb
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from rlgym_learn.api import AgentControllerData
 
 from .dict_metrics_logger import DictMetricsLogger
@@ -29,7 +29,9 @@ def convert_nested_dict(d):
     return new
 
 
-class WandbMetricsLoggerConfigModel(BaseModel, extra="forbid"):
+class WandbMetricsLoggerConfigModel(BaseModel, Generic[InnerMetricsLoggerConfig]):
+    model_config = ConfigDict(extra="forbid")
+
     enable: bool = True
     project: str = "rlgym-learn"
     group: str = "unnamed-runs"
@@ -38,13 +40,11 @@ class WandbMetricsLoggerConfigModel(BaseModel, extra="forbid"):
     new_run_with_timestamp_suffix: bool = False
     additional_wandb_run_config: Dict[str, Any] = Field(default_factory=dict)
     settings_kwargs: Dict[str, Any] = Field(default_factory=dict)
-    inner_metrics_logger_config: InnerMetricsLoggerConfig | None = None
+    inner_metrics_logger_config: Optional[InnerMetricsLoggerConfig] = None
 
 
 @dataclass
-class WandbAdditionalDerivedConfig(
-    Generic[InnerMetricsLoggerConfig, InnerMetricsLoggerAdditionalDerivedConfig]
-):
+class WandbAdditionalDerivedConfig(Generic[InnerMetricsLoggerAdditionalDerivedConfig]):
     derived_wandb_run_config: Dict[str, Any] = Field(default_factory=dict)
     timestamp_suffix: Optional[str] = None
     inner_metrics_logger_additional_derived_config: InnerMetricsLoggerAdditionalDerivedConfig = None
@@ -52,10 +52,8 @@ class WandbAdditionalDerivedConfig(
 
 class WandbMetricsLogger(
     MetricsLogger[
-        WandbMetricsLoggerConfigModel,
-        WandbAdditionalDerivedConfig[
-            InnerMetricsLoggerConfig, InnerMetricsLoggerAdditionalDerivedConfig
-        ],
+        WandbMetricsLoggerConfigModel[InnerMetricsLoggerConfig],
+        WandbAdditionalDerivedConfig[InnerMetricsLoggerAdditionalDerivedConfig],
         AgentControllerData,
     ],
     Generic[
