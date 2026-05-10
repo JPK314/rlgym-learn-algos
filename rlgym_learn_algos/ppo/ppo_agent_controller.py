@@ -36,7 +36,6 @@ from torch import device as _device
 from rlgym_learn_algos.logging import (
     DerivedMetricsLoggerConfig,
     MetricsLogger,
-    MetricsLoggerAdditionalDerivedConfig,
     MetricsLoggerConfig,
     WandbAdditionalDerivedConfig,
     WandbMetricsLogger,
@@ -71,7 +70,7 @@ ITERATION_SHARED_INFOS_FILE = "iteration_shared_infos.pkl"
 class PPOAgentControllerConfigModel(BaseModel, extra="forbid"):
     timesteps_per_iteration: int = 50000
     save_every_ts: int = 1_000_000
-    add_unix_timestamp: bool = True
+    run_suffix: str = Field(default_factory=lambda: f"-{time.time_ns()}")
     checkpoint_load_folder: Optional[str] = None
     n_checkpoints_to_keep: int = 5
     random_seed: int = 123
@@ -248,10 +247,6 @@ class PPOAgentController(
             )
         )
 
-        run_suffix = (
-            f"-{time.time_ns()}" if agent_controller_config.add_unix_timestamp else ""
-        )
-
         if agent_controller_config.checkpoint_load_folder is not None:
             loaded_checkpoint_runs_folder = os.path.abspath(
                 os.path.join(agent_controller_config.checkpoint_load_folder, "../..")
@@ -270,11 +265,14 @@ class PPOAgentController(
                     f"{config.agent_controller_name}: Runs folder in config does not align with loaded checkpoint's runs folder. Creating new run in the config-based runs folder."
                 )
                 checkpoints_save_folder = os.path.join(
-                    config.save_folder, agent_controller_config.run_name + run_suffix
+                    config.save_folder,
+                    agent_controller_config.run_name
+                    + agent_controller_config.run_suffix,
                 )
         else:
             checkpoints_save_folder = os.path.join(
-                config.save_folder, agent_controller_config.run_name + run_suffix
+                config.save_folder,
+                agent_controller_config.run_name + agent_controller_config.run_suffix,
             )
         self.checkpoints_save_folder = checkpoints_save_folder
         print(
@@ -301,21 +299,6 @@ class PPOAgentController(
             )
         )
         if self.metrics_logger is not None:
-            # TODO: move out to util function in wandb_metrics_logger
-            if isinstance(self.metrics_logger, WandbMetricsLogger):
-                additional_derived_config = WandbAdditionalDerivedConfig(
-                    derived_wandb_run_config={
-                        **self.config.agent_controller_config.learner_config.model_dump(),
-                        "exp_buffer_size": self.config.agent_controller_config.experience_buffer_config.max_size,
-                        "timesteps_per_iteration": self.config.agent_controller_config.timesteps_per_iteration,
-                        "n_proc": self.config.process_config.n_proc,
-                        "min_process_steps_per_inference": self.config.process_config.min_process_steps_per_inference,
-                        "timestep_limit": self.config.base_config.timestep_limit,
-                        **self.config.agent_controller_config.experience_buffer_config.trajectory_processor_config,
-                    },
-                    timestamp_suffix=run_suffix,
-                )
-
             self.metrics_logger.load(
                 DerivedMetricsLoggerConfig(
                     derived_agent_controller_config=self.config,

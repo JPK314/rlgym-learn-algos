@@ -41,7 +41,7 @@ class WandbMetricsLoggerConfigModel(BaseModel, extra="forbid"):
     group: str = "unnamed-runs"
     run: str = "rlgym-learn-run"
     id: Optional[str] = None
-    new_run_with_timestamp_suffix: bool = False
+    new_run_with_run_suffix: bool = False
     additional_wandb_run_config: Dict[str, Any] = Field(default_factory=dict)
     settings_kwargs: Dict[str, Any] = Field(default_factory=dict)
     inner_metrics_logger_config: Optional[InstanceOf[BaseModel]] = None
@@ -79,7 +79,7 @@ class WandbMetricsLoggerConfigModel(BaseModel, extra="forbid"):
 @dataclass
 class WandbAdditionalDerivedConfig:
     derived_wandb_run_config: Dict[str, Any] = Field(default_factory=dict)
-    timestamp_suffix: Optional[str] = None
+    run_suffix: Optional[str] = None
 
 
 class WandbMetricsLogger(
@@ -146,43 +146,41 @@ class WandbMetricsLogger(
 
         if self.run_id is not None and self.config.metrics_logger_config.id is not None:
             print(
-                f"{self.config.derived_agent_controller_config.agent_controller_name}: Wandb run id from checkpoint ({self.run_id}) is being overridden by wandb run id from config: {self.config.metrics_logger_config.id}"
+                f"{config.derived_agent_controller_config.agent_controller_name}: Wandb run id from checkpoint ({self.run_id}) is being overridden by wandb run id from config: {config.metrics_logger_config.id}"
             )
-            self.run_id = self.config.metrics_logger_config.id
+            self.run_id = config.metrics_logger_config.id
 
         wandb_config = {
             **self.additional_derived_config.derived_wandb_run_config,
-            **self.config.metrics_logger_config.additional_wandb_run_config,
+            **config.metrics_logger_config.additional_wandb_run_config,
         }
 
-        run_name = self.config.metrics_logger_config.run
-        if self.config.metrics_logger_config.new_run_with_timestamp_suffix:
+        run_name = config.metrics_logger_config.run
+        if config.metrics_logger_config.new_run_with_run_suffix:
             print(
-                f"{self.config.derived_agent_controller_config.agent_controller_name}: Due to config, a new wandb run is being created with timestamp suffix. This run will use the project and group specified in config, and will use the run name in config prepended to the timestamp suffix."
+                f"{config.derived_agent_controller_config.agent_controller_name}: Due to config, a new wandb run is being created with run suffix. This run will use the project and group specified in config, and will use the run name in config prepended to the run suffix."
             )
             if (
-                self.additional_derived_config.timestamp_suffix is not None
-                and len(self.additional_derived_config.timestamp_suffix) > 0
+                self.additional_derived_config.run_suffix is not None
+                and len(self.additional_derived_config.run_suffix) > 0
             ):
-                run_name += self.additional_derived_config.timestamp_suffix
+                run_name += self.additional_derived_config.run_suffix
             else:
                 run_name += f"-{time.time_ns()}"
 
         self.wandb_run = wandb.init(
-            project=self.config.metrics_logger_config.project,
-            group=self.config.metrics_logger_config.group,
+            project=config.metrics_logger_config.project,
+            group=config.metrics_logger_config.group,
             config=wandb_config,
             name=run_name,
             id=self.run_id,
             resume="allow",
             reinit="create_new",
-            settings=wandb.Settings(
-                **self.config.metrics_logger_config.settings_kwargs
-            ),
+            settings=wandb.Settings(**config.metrics_logger_config.settings_kwargs),
         )
         self.run_id = self.wandb_run.id
         print(
-            f"{self.config.derived_agent_controller_config.agent_controller_name}: Created wandb run! {self.run_id}"
+            f"{config.derived_agent_controller_config.agent_controller_name}: Created wandb run! {self.run_id}"
         )
 
     def _load_from_checkpoint(self):
