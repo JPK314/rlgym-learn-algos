@@ -1,30 +1,32 @@
 from abc import abstractmethod
 from dataclasses import dataclass
 from os import PathLike
-from typing import Any, Dict, Generic, List, Optional, TypeVar, Type
+from typing import Any, Dict, Generic, List, Optional, TypeVar, Type, Callable
 from pydantic import BaseModel
 
-from rlgym_learn.api import AgentControllerData
+from rlgym_learn.api import (
+    AgentControllerData,
+    AgentControllerConfig,
+    DerivedAgentControllerConfig,
+)
 
 MetricsLoggerConfig = TypeVar("MetricsLoggerConfig", bound=Optional[BaseModel])
-MetricsLoggerAdditionalDerivedConfig = TypeVar("MetricsLoggerAdditionalDerivedConfig")
 
 
 @dataclass
-class DerivedMetricsLoggerConfig(
-    Generic[MetricsLoggerConfig, MetricsLoggerAdditionalDerivedConfig]
-):
+class DerivedMetricsLoggerConfig(Generic[AgentControllerConfig, MetricsLoggerConfig]):
+    derived_agent_controller_config: DerivedAgentControllerConfig[
+        AgentControllerConfig
+    ] = None
     metrics_logger_config: MetricsLoggerConfig = None
     checkpoint_load_folder: Optional[str] = None
-    agent_controller_name: str = ""
-    additional_derived_config: MetricsLoggerAdditionalDerivedConfig = None
 
 
 # TODO: docs
 class MetricsLogger(
     Generic[
+        AgentControllerConfig,
         MetricsLoggerConfig,
-        MetricsLoggerAdditionalDerivedConfig,
         AgentControllerData,
     ]
 ):
@@ -70,9 +72,7 @@ class MetricsLogger(
 
     def load(
         self,
-        config: DerivedMetricsLoggerConfig[
-            MetricsLoggerConfig, MetricsLoggerAdditionalDerivedConfig
-        ],
+        config: DerivedMetricsLoggerConfig[AgentControllerConfig, MetricsLoggerConfig],
     ):
         """
         Sets data inside this instance using config, which may include loading data from a checkpoint.

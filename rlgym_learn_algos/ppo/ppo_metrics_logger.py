@@ -1,14 +1,14 @@
 from typing import Any, Dict, List
 
 from rlgym_learn_algos.logging import DictMetricsLogger
-from rlgym_learn_algos.ppo import PPOAgentControllerData
+from rlgym_learn_algos.ppo import PPOAgentControllerData, PPOAgentControllerConfigModel
 
 from .gae_trajectory_processor import GAETrajectoryProcessorData
 
 
 class PPOMetricsLogger(
     DictMetricsLogger[
-        None,
+        PPOAgentControllerConfigModel,
         None,
         PPOAgentControllerData[GAETrajectoryProcessorData],
     ],
@@ -63,6 +63,3 @@ class PPOMetricsLogger(
                 "Percent Truncated": data.percent_truncated,
             },
         }
-
-    def validate_config(self, config_obj) -> None:
-        return None

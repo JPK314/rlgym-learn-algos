@@ -1,11 +1,10 @@
 from abc import abstractmethod
 from typing import Any, Dict, Generic
 
-from rlgym_learn.api import AgentControllerData
+from rlgym_learn.api import AgentControllerData, AgentControllerConfig
 
 from .metrics_logger import (
     MetricsLogger,
-    MetricsLoggerAdditionalDerivedConfig,
     MetricsLoggerConfig,
 )
 
@@ -31,16 +30,11 @@ def print_dict(d: dict, indent=""):
 
 
 class DictMetricsLogger(
-    Generic[
+    MetricsLogger[
+        AgentControllerConfig,
         MetricsLoggerConfig,
-        MetricsLoggerAdditionalDerivedConfig,
         AgentControllerData,
     ],
-    MetricsLogger[
-        MetricsLoggerConfig,
-        MetricsLoggerAdditionalDerivedConfig,
-        AgentControllerData
-    ]
 ):
     """
     This is a specification of the MetricsLogger which provides an additional method get_metrics to retrieve the metrics as a dictionary.

@@ -2,18 +2,24 @@ import json
 import os
 import time
 from dataclasses import dataclass
-from typing import Any, Dict, Generic, List, Optional, TypeVar
+from typing import Any, Dict, Generic, List, Optional, TypeVar, Type, Callable
 
 import wandb
-from pydantic import BaseModel, Field
-from rlgym_learn.api import AgentControllerData
+from pydantic import BaseModel, Field, InstanceOf, model_validator, ValidationInfo
+from rlgym_learn.api import (
+    AgentControllerData,
+    AgentControllerConfig,
+    DerivedAgentControllerConfig,
+)
 
 from .dict_metrics_logger import DictMetricsLogger
-from .metrics_logger import DerivedMetricsLoggerConfig, MetricsLogger
+from .metrics_logger import (
+    DerivedMetricsLoggerConfig,
+    MetricsLogger,
+)
 
-InnerMetricsLoggerConfig = TypeVar("InnerMetricsLoggerConfig")
-InnerMetricsLoggerAdditionalDerivedConfig = TypeVar(
-    "InnerMetricsLoggerAdditionalDerivedConfig"
+InnerMetricsLoggerConfig = TypeVar(
+    "InnerMetricsLoggerConfig", bound=Optional[BaseModel]
 )
 
 
@@ -38,44 +44,71 @@ class WandbMetricsLoggerConfigModel(BaseModel, extra="forbid"):
     new_run_with_timestamp_suffix: bool = False
     additional_wandb_run_config: Dict[str, Any] = Field(default_factory=dict)
     settings_kwargs: Dict[str, Any] = Field(default_factory=dict)
+    inner_metrics_logger_config: Optional[InstanceOf[BaseModel]] = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def validate_metrics_logger_config_model(
+        cls, data: Any, info: ValidationInfo
+    ) -> Any:
+        wandb_metrics_logger: WandbMetricsLogger = info.context
+        if wandb_metrics_logger is None:
+            return data
+
+        if isinstance(data, dict) and "inner_metrics_logger_config" in data:
+            inner_metrics_logger_config_raw = data["inner_metrics_logger_config"]
+            if isinstance(inner_metrics_logger_config_raw, dict):
+                inner_metrics_logger_config_model_type: Type[Optional[BaseModel]] = (
+                    wandb_metrics_logger.inner_metrics_logger.config_model
+                )
+                if inner_metrics_logger_config_model_type == type(None):
+                    inner_metrics_logger_config = None
+                else:
+                    inner_metrics_logger_config = (
+                        inner_metrics_logger_config_model_type.model_validate(
+                            inner_metrics_logger_config_raw,
+                            context=wandb_metrics_logger.inner_metrics_logger,
+                        )
+                    )
+            else:
+                inner_metrics_logger_config = inner_metrics_logger_config_raw
+            data["inner_metrics_logger_config"] = inner_metrics_logger_config
+        return data
 
 
 @dataclass
-class WandbAdditionalDerivedConfig(
-    Generic[InnerMetricsLoggerConfig, InnerMetricsLoggerAdditionalDerivedConfig]
-):
+class WandbAdditionalDerivedConfig:
     derived_wandb_run_config: Dict[str, Any] = Field(default_factory=dict)
     timestamp_suffix: Optional[str] = None
-    inner_metrics_logger_config: InnerMetricsLoggerConfig = None
-    inner_metrics_logger_additional_derived_config: (
-        InnerMetricsLoggerAdditionalDerivedConfig
-    ) = None
 
 
 class WandbMetricsLogger(
     MetricsLogger[
+        AgentControllerConfig,
         WandbMetricsLoggerConfigModel,
-        WandbAdditionalDerivedConfig[
-            InnerMetricsLoggerConfig, InnerMetricsLoggerAdditionalDerivedConfig
-        ],
         AgentControllerData,
     ],
-    Generic[
-        InnerMetricsLoggerConfig,
-        InnerMetricsLoggerAdditionalDerivedConfig,
-        AgentControllerData,
-    ],
+    Generic[InnerMetricsLoggerConfig],
 ):
     def __init__(
         self,
         inner_metrics_logger: DictMetricsLogger[
+            AgentControllerConfig,
             InnerMetricsLoggerConfig,
-            InnerMetricsLoggerAdditionalDerivedConfig,
             AgentControllerData,
         ],
+        generate_additional_derived_config_fn: Optional[
+            Callable[
+                [DerivedAgentControllerConfig[AgentControllerConfig]],
+                WandbAdditionalDerivedConfig,
+            ]
+        ] = None,
         checkpoint_file_name: str = "wandb_metrics_logger.json",
     ):
         self.inner_metrics_logger = inner_metrics_logger
+        self.generate_additional_derived_config_fn = (
+            generate_additional_derived_config_fn
+        )
         self.checkpoint_file_name = checkpoint_file_name
         self.run_id = None
 
@@ -94,12 +127,14 @@ class WandbMetricsLogger(
 
     def load(self, config):
         self.config = config
+        self.additional_derived_config = self.generate_additional_derived_config_fn(
+            config.derived_agent_controller_config
+        )
         self.inner_metrics_logger.load(
             DerivedMetricsLoggerConfig(
+                derived_agent_controller_config=config.derived_agent_controller_config,
                 checkpoint_load_folder=config.checkpoint_load_folder,
-                agent_controller_name=config.agent_controller_name,
-                metrics_logger_config=config.additional_derived_config.inner_metrics_logger_config,
-                additional_derived_config=config.additional_derived_config.inner_metrics_logger_additional_derived_config,
+                metrics_logger_config=config.metrics_logger_config.inner_metrics_logger_config,
             )
         )
         if self.config.checkpoint_load_folder is not None:
@@ -111,25 +146,25 @@ class WandbMetricsLogger(
 
         if self.run_id is not None and self.config.metrics_logger_config.id is not None:
             print(
-                f"{self.config.agent_controller_name}: Wandb run id from checkpoint ({self.run_id}) is being overridden by wandb run id from config: {self.config.metrics_logger_config.id}"
+                f"{self.config.derived_agent_controller_config.agent_controller_name}: Wandb run id from checkpoint ({self.run_id}) is being overridden by wandb run id from config: {self.config.metrics_logger_config.id}"
             )
             self.run_id = self.config.metrics_logger_config.id
 
         wandb_config = {
-            **self.config.additional_derived_config.derived_wandb_run_config,
+            **self.additional_derived_config.derived_wandb_run_config,
             **self.config.metrics_logger_config.additional_wandb_run_config,
         }
 
         run_name = self.config.metrics_logger_config.run
         if self.config.metrics_logger_config.new_run_with_timestamp_suffix:
             print(
-                f"{self.config.agent_controller_name}: Due to config, a new wandb run is being created with timestamp suffix. This run will use the project and group specified in config, and will use the run name in config prepended to the timestamp suffix."
+                f"{self.config.derived_agent_controller_config.agent_controller_name}: Due to config, a new wandb run is being created with timestamp suffix. This run will use the project and group specified in config, and will use the run name in config prepended to the timestamp suffix."
             )
             if (
-                self.config.additional_derived_config.timestamp_suffix is not None
-                and len(self.config.additional_derived_config.timestamp_suffix) > 0
+                self.additional_derived_config.timestamp_suffix is not None
+                and len(self.additional_derived_config.timestamp_suffix) > 0
             ):
-                run_name += self.config.additional_derived_config.timestamp_suffix
+                run_name += self.additional_derived_config.timestamp_suffix
             else:
                 run_name += f"-{time.time_ns()}"
 
@@ -146,7 +181,9 @@ class WandbMetricsLogger(
             ),
         )
         self.run_id = self.wandb_run.id
-        print(f"{self.config.agent_controller_name}: Created wandb run! {self.run_id}")
+        print(
+            f"{self.config.derived_agent_controller_config.agent_controller_name}: Created wandb run! {self.run_id}"
+        )
 
     def _load_from_checkpoint(self):
         try:
@@ -164,7 +201,7 @@ class WandbMetricsLogger(
                 self.run_id = None
         except FileNotFoundError:
             print(
-                f"{self.config.agent_controller_name}: Tried to load wandb run from checkpoint using the file at location {str(os.path.join(self.config.checkpoint_load_folder, self.checkpoint_file_name))}, but there is no such file! A new run will be created based on the config values instead."
+                f"{self.config.derived_agent_controller_config.agent_controller_name}: Tried to load wandb run from checkpoint using the file at location {str(os.path.join(self.config.checkpoint_load_folder, self.checkpoint_file_name))}, but there is no such file! A new run will be created based on the config values instead."
             )
             self.run_id = None
 

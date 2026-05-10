@@ -30,7 +30,7 @@ from rlgym.api import (
     StateType,
 )
 from rlgym_learn import EnvActionResponse, EnvActionResponseType, Timestep
-from rlgym_learn.api.agent_controller import AgentController
+from rlgym_learn.api import AgentController, DerivedAgentControllerConfig
 from torch import device as _device
 
 from rlgym_learn_algos.logging import (
@@ -112,16 +112,6 @@ class PPOAgentControllerConfigModel(BaseModel, extra="forbid"):
             data["metrics_logger_config"] = metrics_logger_config
         return data
 
-    @field_serializer("metrics_logger_config")
-    def ser_metrics_logger_config(
-        self, metrics_logger_config: Optional[BaseModel]
-    ) -> Dict[str, Any]:
-        return (
-            None
-            if metrics_logger_config is None
-            else metrics_logger_config.model_dump()
-        )
-
 
 @dataclass
 class PPOAgentControllerData(Generic[TrajectoryProcessorData]):
@@ -179,8 +169,8 @@ class PPOAgentController(
         ],
         metrics_logger: Optional[
             MetricsLogger[
+                DerivedAgentControllerConfig[PPOAgentControllerConfigModel],
                 MetricsLoggerConfig,
-                MetricsLoggerAdditionalDerivedConfig,
                 PPOAgentControllerData[TrajectoryProcessorData],
             ]
         ] = None,
@@ -311,9 +301,7 @@ class PPOAgentController(
             )
         )
         if self.metrics_logger is not None:
-            metrics_logger_config = self.metrics_logger.validate_config(
-                self.config.agent_controller_config.metrics_logger_config
-            )
+            # TODO: move out to util function in wandb_metrics_logger
             if isinstance(self.metrics_logger, WandbMetricsLogger):
                 additional_derived_config = WandbAdditionalDerivedConfig(
                     derived_wandb_run_config={
@@ -327,14 +315,12 @@ class PPOAgentController(
                     },
                     timestamp_suffix=run_suffix,
                 )
-            else:
-                additional_derived_config = None
+
             self.metrics_logger.load(
                 DerivedMetricsLoggerConfig(
-                    metrics_logger_config=metrics_logger_config,
+                    derived_agent_controller_config=self.config,
+                    metrics_logger_config=self.config.agent_controller_config.metrics_logger_config,
                     checkpoint_load_folder=metrics_logger_checkpoint_load_folder,
-                    agent_controller_name=config.agent_controller_name,
-                    additional_derived_config=additional_derived_config,
                 )
             )
 
