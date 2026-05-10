@@ -84,7 +84,7 @@ macro_rules! define_process_trajectories {
                         .extract::<Vec<$dtype>>()?;
                     log_probs_list.push(trajectory.log_probs);
                     values_list.push(trajectory.val_preds.clone());
-                    let value_preds = unsafe {
+                    let value_preds_old = unsafe {
                         let ptr = trajectory
                             .val_preds
                             .call_method0(intern!(py, "data_ptr"))?
@@ -96,8 +96,17 @@ macro_rules! define_process_trajectories {
                                 .call_method0(intern!(py, "numel"))?
                                 .extract::<usize>()?,
                         );
-                        mem
+                        mem.clone()
                     };
+                    let value_preds_py_array = &trajectory
+                        .val_preds
+                        .call_method0(intern!(py, "cpu"))?
+                        .call_method0(intern!(py, "numpy"))?
+                        .downcast_into::<numpy::PyArray1<$dtype>>()?;
+                    let value_preds = unsafe { numpy::PyArrayMethods::as_slice(value_preds_py_array)?};
+                    if value_preds_old != value_preds {
+                        Err(pyo3::exceptions::asyncio::InvalidStateError::new_err(format!("Something caused direct access to the data pointer for value preds to not work.\nData pointer data: {:?}\nData accessed through numpy: {:?}", value_preds_old, value_preds)))?;
+                    }
                     let mut trajectory_agent_id_list = Vec::with_capacity(trajectory_len);
                     let mut trajectory_observation_list = Vec::with_capacity(trajectory_len);
                     let mut trajectory_action_list = Vec::with_capacity(trajectory_len);
