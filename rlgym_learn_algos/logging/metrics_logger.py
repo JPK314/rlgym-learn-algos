@@ -1,11 +1,12 @@
 from abc import abstractmethod
 from dataclasses import dataclass
 from os import PathLike
-from typing import Any, Dict, Generic, List, Optional, TypeVar
+from typing import Any, Dict, Generic, List, Optional, TypeVar, Type
+from pydantic import BaseModel
 
 from rlgym_learn.api import AgentControllerData
 
-MetricsLoggerConfig = TypeVar("MetricsLoggerConfig")
+MetricsLoggerConfig = TypeVar("MetricsLoggerConfig", bound=Optional[BaseModel])
 MetricsLoggerAdditionalDerivedConfig = TypeVar("MetricsLoggerAdditionalDerivedConfig")
 
 
@@ -39,6 +40,13 @@ class MetricsLogger(
     AgentControllerData is the type used for collection of data from the agent controller containing this metrics logger.
     """
 
+    @property
+    def config_model(self) -> Type[MetricsLoggerConfig]:
+        """
+        Function to return the config model type that your MetricsLogger implementation uses. Defaults to NoneType.
+        """
+        return type(None)
+
     def collect_env_metrics(self, data: List[Dict[str, Any]]):
         """
         This method is intended to allow batch processing of env metrics using the shared info deserialized from the env processes. The result of processing should be stored and used the next time report_metrics is called.
@@ -57,16 +65,6 @@ class MetricsLogger(
     def report_metrics(self):
         """
         This method is intended to have arbitrary side effects based on data collected so far. This could be printing, or logging to wandb, or sending data to a redis server, or whatever.
-        """
-        raise NotImplementedError
-
-    @abstractmethod
-    def validate_config(self, config_obj: Dict[str, Any]) -> MetricsLoggerConfig:
-        """
-        Any class inheriting from this one has some sort of pydantic config (or None) that it expects to receive for loading. The agent controller may be generic over the type of metrics logger used, so it
-        needs some way of creating an instance of the particular MetricsLoggerConfig used based on a general-purpose config dict that doesn't have any guarantees on contents.
-
-        :return: an instance of the (pydantic) config model used by this class (or None), to be placed inside an instance of DerivedMetricsLoggerConfig when calling load.
         """
         raise NotImplementedError
 
