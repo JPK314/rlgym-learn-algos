@@ -22,7 +22,7 @@ class DerivedMetricsLoggerConfig(Generic[AgentControllerConfig, MetricsLoggerCon
     checkpoint_load_folder: Optional[str] = None
 
 
-# TODO: docs
+# TODO: update docs
 class MetricsLogger(
     Generic[
         AgentControllerConfig,

@@ -12,11 +12,16 @@ from rlgym_learn.api import (
     DerivedAgentControllerConfig,
 )
 
-from .dict_metrics_logger import DictMetricsLogger
-from .metrics_logger import (
+from ..dict_metrics_logger import DictMetricsLogger
+from ..metrics_logger import (
     DerivedMetricsLoggerConfig,
     MetricsLogger,
 )
+
+# wandb can create a /wandb folder on sys.path that python thinks is module it can import.
+# If wandb gets uninstalled but this folder stays then python will resolve this folder as a module it can import, which causes confusion
+if wandb.__file__ is None:
+    raise ModuleNotFoundError("No module named 'wandb'", name="wandb")
 
 InnerMetricsLoggerConfig = TypeVar(
     "InnerMetricsLoggerConfig", bound=Optional[BaseModel]
@@ -88,7 +93,7 @@ class WandbMetricsLogger(
         WandbMetricsLoggerConfigModel,
         AgentControllerData,
     ],
-    Generic[InnerMetricsLoggerConfig],
+    Generic[AgentControllerConfig, AgentControllerData, InnerMetricsLoggerConfig],
 ):
     def __init__(
         self,
@@ -97,7 +102,7 @@ class WandbMetricsLogger(
             InnerMetricsLoggerConfig,
             AgentControllerData,
         ],
-        generate_additional_derived_config_fn: Optional[
+        additional_derived_config_factory: Optional[
             Callable[
                 [DerivedAgentControllerConfig[AgentControllerConfig]],
                 WandbAdditionalDerivedConfig,
@@ -106,11 +111,13 @@ class WandbMetricsLogger(
         checkpoint_file_name: str = "wandb_metrics_logger.json",
     ):
         self.inner_metrics_logger = inner_metrics_logger
-        self.generate_additional_derived_config_fn = (
-            generate_additional_derived_config_fn
-        )
+        self.additional_derived_config_factory = additional_derived_config_factory
         self.checkpoint_file_name = checkpoint_file_name
         self.run_id = None
+
+    @property
+    def config_model(self):
+        return WandbMetricsLoggerConfigModel
 
     def collect_env_metrics(self, data: List[Dict[str, Any]]):
         self.inner_metrics_logger.collect_env_metrics(data)
@@ -127,8 +134,12 @@ class WandbMetricsLogger(
 
     def load(self, config):
         self.config = config
-        self.additional_derived_config = self.generate_additional_derived_config_fn(
-            config.derived_agent_controller_config
+        self.additional_derived_config = (
+            WandbAdditionalDerivedConfig()
+            if self.additional_derived_config_factory is None
+            else self.additional_derived_config_factory(
+                config.derived_agent_controller_config
+            )
         )
         self.inner_metrics_logger.load(
             DerivedMetricsLoggerConfig(

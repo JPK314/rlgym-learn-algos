@@ -37,8 +37,6 @@ from rlgym_learn_algos.logging import (
     DerivedMetricsLoggerConfig,
     MetricsLogger,
     MetricsLoggerConfig,
-    WandbAdditionalDerivedConfig,
-    WandbMetricsLogger,
 )
 from rlgym_learn_algos.stateful_functions import ObsStandardizer
 

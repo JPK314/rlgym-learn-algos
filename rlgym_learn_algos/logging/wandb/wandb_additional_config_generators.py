@@ -1,10 +1,10 @@
 from rlgym_learn.api import DerivedAgentControllerConfig
 
 from ...ppo.ppo_agent_controller import PPOAgentControllerConfigModel
-from ..wandb_metrics_logger import WandbAdditionalDerivedConfig
+from .wandb_metrics_logger import WandbAdditionalDerivedConfig
 
 
-def generate_wandb_additional_derived_config_for_ppo(
+def ppo_additional_derived_config_factory(
     config: DerivedAgentControllerConfig[PPOAgentControllerConfigModel],
 ):
     return WandbAdditionalDerivedConfig(
