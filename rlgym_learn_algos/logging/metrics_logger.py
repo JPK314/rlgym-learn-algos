@@ -1,29 +1,32 @@
 from abc import abstractmethod
 from dataclasses import dataclass
 from os import PathLike
-from typing import Any, Dict, Generic, List, Optional, TypeVar
+from typing import Any, Dict, Generic, List, Optional, TypeVar, Type, Callable
+from pydantic import BaseModel
 
-from rlgym_learn.api import AgentControllerData
+from rlgym_learn.api import (
+    AgentControllerData,
+    AgentControllerConfig,
+    DerivedAgentControllerConfig,
+)
 
-MetricsLoggerConfig = TypeVar("MetricsLoggerConfig")
-MetricsLoggerAdditionalDerivedConfig = TypeVar("MetricsLoggerAdditionalDerivedConfig")
+MetricsLoggerConfig = TypeVar("MetricsLoggerConfig", bound=Optional[BaseModel])
 
 
 @dataclass
-class DerivedMetricsLoggerConfig(
-    Generic[MetricsLoggerConfig, MetricsLoggerAdditionalDerivedConfig]
-):
+class DerivedMetricsLoggerConfig(Generic[AgentControllerConfig, MetricsLoggerConfig]):
+    derived_agent_controller_config: DerivedAgentControllerConfig[
+        AgentControllerConfig
+    ] = None
     metrics_logger_config: MetricsLoggerConfig = None
     checkpoint_load_folder: Optional[str] = None
-    agent_controller_name: str = ""
-    additional_derived_config: MetricsLoggerAdditionalDerivedConfig = None
 
 
-# TODO: docs
+# TODO: update docs
 class MetricsLogger(
     Generic[
+        AgentControllerConfig,
         MetricsLoggerConfig,
-        MetricsLoggerAdditionalDerivedConfig,
         AgentControllerData,
     ]
 ):
@@ -38,6 +41,13 @@ class MetricsLogger(
 
     AgentControllerData is the type used for collection of data from the agent controller containing this metrics logger.
     """
+
+    @property
+    def config_model(self) -> Type[MetricsLoggerConfig]:
+        """
+        Function to return the config model type that your MetricsLogger implementation uses. Defaults to NoneType.
+        """
+        return type(None)
 
     def collect_env_metrics(self, data: List[Dict[str, Any]]):
         """
@@ -60,21 +70,9 @@ class MetricsLogger(
         """
         raise NotImplementedError
 
-    @abstractmethod
-    def validate_config(self, config_obj: Dict[str, Any]) -> MetricsLoggerConfig:
-        """
-        Any class inheriting from this one has some sort of pydantic config (or None) that it expects to receive for loading. The agent controller may be generic over the type of metrics logger used, so it
-        needs some way of creating an instance of the particular MetricsLoggerConfig used based on a general-purpose config dict that doesn't have any guarantees on contents.
-
-        :return: an instance of the (pydantic) config model used by this class (or None), to be placed inside an instance of DerivedMetricsLoggerConfig when calling load.
-        """
-        raise NotImplementedError
-
     def load(
         self,
-        config: DerivedMetricsLoggerConfig[
-            MetricsLoggerConfig, MetricsLoggerAdditionalDerivedConfig
-        ],
+        config: DerivedMetricsLoggerConfig[AgentControllerConfig, MetricsLoggerConfig],
     ):
         """
         Sets data inside this instance using config, which may include loading data from a checkpoint.
