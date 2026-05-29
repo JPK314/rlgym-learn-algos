@@ -12,14 +12,7 @@ from typing import Any, Dict, Generic, List, Optional, Tuple, Type
 
 import numpy as np
 import torch
-from pydantic import (
-    BaseModel,
-    Field,
-    model_validator,
-    InstanceOf,
-    ValidationInfo,
-    field_serializer,
-)
+from pydantic import BaseModel, Field, model_validator, InstanceOf, ValidationInfo
 from rlgym.api import (
     ActionSpaceType,
     ActionType,

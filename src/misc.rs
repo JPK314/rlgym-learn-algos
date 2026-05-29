@@ -2,9 +2,10 @@ use std::mem::align_of;
 
 use pyo3::{
     intern,
-    sync::GILOnceCell,
+    prelude::*,
+    sync::PyOnceLock,
     types::{PyAnyMethods, PyDict},
-    Bound, IntoPyObject, PyAny, PyErr, PyObject, PyResult, Python,
+    Python,
 };
 
 pub fn get_bytes_to_alignment<T>(addr: usize) -> usize {
@@ -13,7 +14,7 @@ pub fn get_bytes_to_alignment<T>(addr: usize) -> usize {
     aligned_addr.wrapping_sub(addr)
 }
 
-pub fn clone_list<'py>(py: Python<'py>, list: &Vec<PyObject>) -> Vec<PyObject> {
+pub fn clone_list<'py>(py: Python<'py>, list: &Vec<Py<PyAny>>) -> Vec<Py<PyAny>> {
     list.iter().map(|obj| obj.clone_ref(py)).collect()
 }
 
@@ -27,7 +28,7 @@ pub fn tensor_slice_1d<'py>(
 }
 
 pub fn torch_cat<'py>(py: Python<'py>, obj: &[Bound<'py, PyAny>]) -> PyResult<Bound<'py, PyAny>> {
-    static INTERNED_CAT: GILOnceCell<PyObject> = GILOnceCell::new();
+    static INTERNED_CAT: PyOnceLock<Py<PyAny>> = PyOnceLock::new();
     Ok(INTERNED_CAT
         .get_or_try_init::<_, PyErr>(py, || Ok(py.import("torch")?.getattr("cat")?.unbind()))?
         .bind(py)
@@ -38,7 +39,7 @@ pub fn torch_empty<'py>(
     shape: &Bound<'py, PyAny>,
     dtype: &Bound<'py, PyAny>,
 ) -> PyResult<Bound<'py, PyAny>> {
-    static INTERNED_EMPTY: GILOnceCell<PyObject> = GILOnceCell::new();
+    static INTERNED_EMPTY: PyOnceLock<Py<PyAny>> = PyOnceLock::new();
     let py = shape.py();
     Ok(INTERNED_EMPTY
         .get_or_try_init::<_, PyErr>(py, || Ok(py.import("torch")?.getattr("empty")?.unbind()))?

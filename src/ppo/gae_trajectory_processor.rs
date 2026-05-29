@@ -7,7 +7,6 @@ use pyo3::exceptions::PyNotImplementedError;
 use pyo3::exceptions::PyRuntimeError;
 use pyo3::intern;
 use pyo3::prelude::*;
-use pyo3::PyObject;
 
 use super::trajectory::Trajectory;
 use crate::common::NumpyDtype;
@@ -15,15 +14,15 @@ use crate::misc::torch_cat;
 
 #[pyclass]
 pub struct DerivedGAETrajectoryProcessorConfig {
-    gamma: PyObject,
-    lambda: PyObject,
+    gamma: Py<PyAny>,
+    lambda: Py<PyAny>,
     dtype: Py<PyArrayDescr>,
 }
 
 #[pymethods]
 impl DerivedGAETrajectoryProcessorConfig {
     #[new]
-    fn new(gamma: PyObject, lmbda: PyObject, dtype: Py<PyArrayDescr>) -> Self {
+    fn new(gamma: Py<PyAny>, lmbda: Py<PyAny>, dtype: Py<PyArrayDescr>) -> Self {
         DerivedGAETrajectoryProcessorConfig {
             gamma,
             lambda: lmbda,
@@ -164,16 +163,16 @@ define_process_trajectories!(f32);
 
 #[pyclass]
 pub struct GAETrajectoryProcessor {
-    gamma: Option<PyObject>,
-    lambda: Option<PyObject>,
+    gamma: Option<Py<PyAny>>,
+    lambda: Option<Py<PyAny>>,
     dtype: Option<NumpyDtype>,
-    batch_reward_type_numpy_converter: PyObject,
+    batch_reward_type_numpy_converter: Py<PyAny>,
 }
 
 #[pymethods]
 impl GAETrajectoryProcessor {
     #[new]
-    pub fn new(batch_reward_type_numpy_converter: PyObject) -> PyResult<Self> {
+    pub fn new(batch_reward_type_numpy_converter: Py<PyAny>) -> PyResult<Self> {
         Ok(GAETrajectoryProcessor {
             gamma: None,
             lambda: None,
@@ -183,7 +182,7 @@ impl GAETrajectoryProcessor {
     }
 
     pub fn load(&mut self, config: &DerivedGAETrajectoryProcessorConfig) -> PyResult<()> {
-        Python::with_gil(|py| {
+        Python::attach(|py| {
             self.gamma = Some(config.gamma.clone_ref(py));
             self.lambda = Some(config.lambda.clone_ref(py));
             self.dtype = Some(config.dtype.extract::<NumpyDtype>(py)?);
