@@ -103,7 +103,7 @@ class _TorchDevicePydanticAnnotation:
             python_schema=core_schema.union_schema(
                 [
                     # check if it's an instance first before doing any further work
-                    core_schema.is_instance_schema(torch.dtype),
+                    core_schema.is_instance_schema(torch.device),
                     from_str_schema,
                     from_int_schema,
                 ]
