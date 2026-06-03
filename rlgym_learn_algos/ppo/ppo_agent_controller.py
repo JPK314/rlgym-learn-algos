@@ -8,11 +8,11 @@ import shutil
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Dict, Generic, List, Optional, Tuple, Union
+from typing import Any, Dict, Generic, List, Optional, Tuple, Type
 
 import numpy as np
 import torch
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, InstanceOf, ValidationInfo, model_validator
 from rlgym.api import (
     ActionSpaceType,
     ActionType,
@@ -23,19 +23,15 @@ from rlgym.api import (
     StateType,
 )
 from rlgym_learn import EnvActionResponse, EnvActionResponseType, Timestep
-from rlgym_learn.api.agent_controller import AgentController
+from rlgym_learn.api import AgentController, DerivedAgentControllerConfig
 from torch import device as _device
 
 from rlgym_learn_algos.logging import (
     DerivedMetricsLoggerConfig,
     MetricsLogger,
-    MetricsLoggerAdditionalDerivedConfig,
     MetricsLoggerConfig,
-    WandbAdditionalDerivedConfig,
-    WandbMetricsLogger,
 )
 from rlgym_learn_algos.stateful_functions import ObsStandardizer
-from rlgym_learn_algos.util.torch_functions import get_device
 
 from .actor import Actor
 from .critic import Critic
@@ -58,14 +54,16 @@ EXPERIENCE_BUFFER_FOLDER = "experience_buffer"
 PPO_LEARNER_FOLDER = "ppo_learner"
 METRICS_LOGGER_FOLDER = "metrics_logger"
 PPO_AGENT_FILE = "ppo_agent.json"
-ITERATION_TRAJECTORIES_FILE = "current_trajectories.pkl"  # this should be renamed, but it would be a breaking change so I'm leaving it until I happen to make one of those and remember to update this at the same time
+ITERATION_TRAJECTORIES_FILE = "iteration_trajectories.pkl"
 ITERATION_SHARED_INFOS_FILE = "iteration_shared_infos.pkl"
 
 
-class PPOAgentControllerConfigModel(BaseModel, extra="forbid"):
+class PPOAgentControllerConfigModel(
+    BaseModel, Generic[MetricsLoggerConfig], extra="forbid"
+):
     timesteps_per_iteration: int = 50000
     save_every_ts: int = 1_000_000
-    add_unix_timestamp: bool = True
+    run_suffix: str = Field(default_factory=lambda: f"-{time.time_ns()}")
     checkpoint_load_folder: Optional[str] = None
     n_checkpoints_to_keep: int = 5
     random_seed: int = 123
@@ -75,19 +73,61 @@ class PPOAgentControllerConfigModel(BaseModel, extra="forbid"):
         default_factory=ExperienceBufferConfigModel
     )
     run_name: str = "rlgym-learn-run"
-    metrics_logger_config: Dict[str, Any] = Field(default_factory=dict)
+    metrics_logger_config: Optional[MetricsLoggerConfig] = None
 
     @model_validator(mode="before")
     @classmethod
-    def set_metrics_logger_config(cls, data):
-        if isinstance(data, PPOAgentControllerConfigModel):
-            if isinstance(data.metrics_logger_config, BaseModel):
-                data.metrics_logger_config = data.metrics_logger_config.model_dump()
-        elif isinstance(data, dict) and "metrics_logger_config" in data:
-            if isinstance(data["metrics_logger_config"], BaseModel):
-                data["metrics_logger_config"] = data[
-                    "metrics_logger_config"
-                ].model_dump()
+    def validate_metrics_logger_config_model(
+        cls, data: Any, info: ValidationInfo
+    ) -> Any:
+        ppo_agent_controller: Optional[PPOAgentController] = info.context
+
+        if (
+            ppo_agent_controller is not None
+            and ppo_agent_controller.metrics_logger is not None
+            and isinstance(data, dict)
+            and "metrics_logger_config" in data
+        ):
+            metrics_logger_config_raw = data["metrics_logger_config"]
+            if isinstance(metrics_logger_config_raw, dict):
+                metrics_logger_config_model_type: Type[Optional[BaseModel]] = (
+                    ppo_agent_controller.metrics_logger.config_model
+                )
+                if metrics_logger_config_model_type is type(None):
+                    metrics_logger_config = None
+                else:
+                    metrics_logger_config = (
+                        metrics_logger_config_model_type.model_validate(
+                            metrics_logger_config_raw,
+                            context=ppo_agent_controller.metrics_logger,
+                        )
+                    )
+            else:
+                metrics_logger_config = metrics_logger_config_raw
+            data["metrics_logger_config"] = metrics_logger_config
+        return data
+
+    @model_validator(mode="before")
+    @classmethod
+    def validate_experience_buffer_config_model(
+        cls, data: Any, info: ValidationInfo
+    ) -> Any:
+        ppo_agent_controller: Optional[PPOAgentController] = info.context
+
+        if (
+            ppo_agent_controller is not None
+            and isinstance(data, dict)
+            and "experience_buffer_config" in data
+        ):
+            experience_buffer_config_raw = data["experience_buffer_config"]
+            if isinstance(experience_buffer_config_raw, dict):
+                experience_buffer_config = ExperienceBufferConfigModel.model_validate(
+                    experience_buffer_config_raw,
+                    context=ppo_agent_controller.experience_buffer,
+                )
+            else:
+                experience_buffer_config = experience_buffer_config_raw
+            data["experience_buffer_config"] = experience_buffer_config
         return data
 
 
@@ -147,15 +187,15 @@ class PPOAgentController(
         ],
         metrics_logger: Optional[
             MetricsLogger[
+                PPOAgentControllerConfigModel,
                 MetricsLoggerConfig,
-                MetricsLoggerAdditionalDerivedConfig,
                 PPOAgentControllerData[TrajectoryProcessorData],
             ]
         ] = None,
         obs_standardizer: Optional[ObsStandardizer] = None,
-        agent_choice_fn: Callable[
-            [List[AgentID]], List[int]
-        ] = lambda agent_id_list: list(range(len(agent_id_list))),
+        agent_choice_fn: Callable[[List[AgentID]], List[int]] = lambda agent_id_list: (
+            list(range(len(agent_id_list)))
+        ),
     ):
         self.learner = PPOLearner(actor_factory, critic_factory)
         self.experience_buffer = experience_buffer
@@ -169,10 +209,10 @@ class PPOAgentController(
 
         self.current_env_trajectories: Dict[
             str,
-            EnvTrajectories[AgentID, ActionType, ObsType, RewardType],
+            EnvTrajectories[AgentID, ObsType, ActionType, RewardType],
         ] = {}
         self.iteration_trajectories: List[
-            Trajectory[AgentID, ActionType, ObsType, RewardType]
+            Trajectory[AgentID, ObsType, ActionType, RewardType]
         ] = []
         self.iteration_shared_infos: List[Dict[str, Any]] = []
         self.cur_iteration = 0
@@ -186,12 +226,13 @@ class PPOAgentController(
         self.iteration_truncated_episodes = 0
         self.iteration_natural_episode_lengths: List[int] = []
 
+    @property
+    def config_model(self):
+        return PPOAgentControllerConfigModel
+
     def set_space_types(self, obs_space, action_space):
         self.obs_space = obs_space
         self.action_space = action_space
-
-    def validate_config(self, config_obj):
-        return PPOAgentControllerConfigModel.model_validate(config_obj)
 
     def load(self, config):
         self.config = config
@@ -225,10 +266,6 @@ class PPOAgentController(
             )
         )
 
-        run_suffix = (
-            f"-{time.time_ns()}" if agent_controller_config.add_unix_timestamp else ""
-        )
-
         if agent_controller_config.checkpoint_load_folder is not None:
             loaded_checkpoint_runs_folder = os.path.abspath(
                 os.path.join(agent_controller_config.checkpoint_load_folder, "../..")
@@ -247,11 +284,14 @@ class PPOAgentController(
                     f"{config.agent_controller_name}: Runs folder in config does not align with loaded checkpoint's runs folder. Creating new run in the config-based runs folder."
                 )
                 checkpoints_save_folder = os.path.join(
-                    config.save_folder, agent_controller_config.run_name + run_suffix
+                    config.save_folder,
+                    agent_controller_config.run_name
+                    + agent_controller_config.run_suffix,
                 )
         else:
             checkpoints_save_folder = os.path.join(
-                config.save_folder, agent_controller_config.run_name + run_suffix
+                config.save_folder,
+                agent_controller_config.run_name + agent_controller_config.run_suffix,
             )
         self.checkpoints_save_folder = checkpoints_save_folder
         print(
@@ -278,30 +318,11 @@ class PPOAgentController(
             )
         )
         if self.metrics_logger is not None:
-            metrics_logger_config = self.metrics_logger.validate_config(
-                self.config.agent_controller_config.metrics_logger_config
-            )
-            if isinstance(self.metrics_logger, WandbMetricsLogger):
-                additional_derived_config = WandbAdditionalDerivedConfig(
-                    derived_wandb_run_config={
-                        **self.config.agent_controller_config.learner_config.model_dump(),
-                        "exp_buffer_size": self.config.agent_controller_config.experience_buffer_config.max_size,
-                        "timesteps_per_iteration": self.config.agent_controller_config.timesteps_per_iteration,
-                        "n_proc": self.config.process_config.n_proc,
-                        "min_process_steps_per_inference": self.config.process_config.min_process_steps_per_inference,
-                        "timestep_limit": self.config.base_config.timestep_limit,
-                        **self.config.agent_controller_config.experience_buffer_config.trajectory_processor_config,
-                    },
-                    timestamp_suffix=run_suffix,
-                )
-            else:
-                additional_derived_config = None
             self.metrics_logger.load(
                 DerivedMetricsLoggerConfig(
-                    metrics_logger_config=metrics_logger_config,
+                    derived_agent_controller_config=self.config,
+                    metrics_logger_config=self.config.agent_controller_config.metrics_logger_config,
                     checkpoint_load_folder=metrics_logger_checkpoint_load_folder,
-                    agent_controller_name=config.agent_controller_name,
-                    additional_derived_config=additional_derived_config,
                 )
             )
 
@@ -313,6 +334,9 @@ class PPOAgentController(
         random.seed(self.config.base_config.random_seed)
 
     def _load_from_checkpoint(self):
+        assert self.config.agent_controller_config.checkpoint_load_folder is not None, (
+            "Cannot load from checkpoint when no checkpoint load folder is in config!"
+        )
         try:
             with open(
                 os.path.join(
@@ -503,12 +527,16 @@ class PPOAgentController(
             done = all(self.current_env_trajectories[env_id].dones.values())
             if done:
                 env_action_responses[env_id] = EnvActionResponse.RESET()
-                is_truncated = any(self.current_env_trajectories[env_id].truncateds.values())
+                is_truncated = any(
+                    self.current_env_trajectories[env_id].truncateds.values()
+                )
                 if is_truncated:
                     self.iteration_truncated_episodes += 1
                 episode_length = sum(
-                    len(obs_list) 
-                    for obs_list in self.current_env_trajectories[env_id].obs_lists.values()
+                    len(obs_list)
+                    for obs_list in self.current_env_trajectories[
+                        env_id
+                    ].obs_lists.values()
                 )
                 self.iteration_natural_episode_lengths.append(episode_length)
                 self.iteration_total_episodes += 1
@@ -544,15 +572,21 @@ class PPOAgentController(
         ppo_data = self.learner.learn(self.experience_buffer)
 
         if self.iteration_natural_episode_lengths:
-            natural_lengths_array = np.array(self.iteration_natural_episode_lengths, dtype=np.int64)
+            natural_lengths_array = np.array(
+                self.iteration_natural_episode_lengths, dtype=np.int64
+            )
             natural_episode_length_mean = float(natural_lengths_array.mean())
             natural_episode_length_median = float(np.median(natural_lengths_array))
         else:
             natural_episode_length_mean = 0.0
             natural_episode_length_median = 0.0
-            print(f"{self.config.agent_controller_name}: No natural episode endings this iteration")
+            print(
+                f"{self.config.agent_controller_name}: No natural episode endings this iteration"
+            )
 
-        percent_truncated = self.iteration_truncated_episodes / (self.iteration_total_episodes + 1e-10)
+        percent_truncated = self.iteration_truncated_episodes / (
+            self.iteration_total_episodes + 1e-10
+        )
 
         cur_time = time.perf_counter()
         if self.metrics_logger is not None:

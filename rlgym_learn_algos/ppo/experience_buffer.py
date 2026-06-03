@@ -1,14 +1,13 @@
 import os
 import pickle
 from dataclasses import dataclass
-from typing import Any, Dict, Generic, Iterable, List, Optional, Tuple
+from typing import Any, Generic, Iterable, List, Optional, Tuple, Type
 
 import numpy as np
 import torch
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, InstanceOf, ValidationInfo, model_validator
 from rlgym.api import ActionType, AgentID, ObsType, RewardType
 
-from rlgym_learn_algos.util.torch_functions import get_device
 from rlgym_learn_algos.util.torch_pydantic import PydanticTorchDevice
 
 from .trajectory import Trajectory
@@ -22,29 +21,44 @@ from .trajectory_processor import (
 EXPERIENCE_BUFFER_FILE = "experience_buffer.pkl"
 
 
-class ExperienceBufferConfigModel(BaseModel, extra="forbid"):
+# TODO: why is device even here?
+class ExperienceBufferConfigModel(
+    BaseModel, Generic[TrajectoryProcessorConfig], extra="forbid"
+):
     max_size: int = 100000
-    device: PydanticTorchDevice = "auto"
+    device: PydanticTorchDevice = "cpu"  # pyright: ignore [reportAssignmentType]
     save_experience_buffer_in_checkpoint: bool = True
-    trajectory_processor_config: Dict[str, Any] = Field(default_factory=dict)
+    trajectory_processor_config: Optional[TrajectoryProcessorConfig] = None
 
     @model_validator(mode="before")
     @classmethod
-    def set_trajectory_processor_config(cls, data):
-        if isinstance(data, ExperienceBufferConfigModel):
-            if isinstance(data.trajectory_processor_config, BaseModel):
-                data.trajectory_processor_config = (
-                    data.trajectory_processor_config.model_dump()
+    def validate_trajectory_processor_config_model(
+        cls, data: Any, info: ValidationInfo
+    ):
+        experience_buffer: Optional[ExperienceBuffer] = info.context
+
+        if (
+            experience_buffer is not None
+            and isinstance(data, dict)
+            and "trajectory_processor_config" in data
+        ):
+            trajectory_processor_config_raw = data["trajectory_processor_config"]
+            if isinstance(trajectory_processor_config_raw, dict):
+                trajectory_processor_config_model_type: Type[Optional[BaseModel]] = (
+                    experience_buffer.trajectory_processor.config_model
                 )
-        elif isinstance(data, dict):
-            if "trajectory_processor_config" in data:
-                if isinstance(data["trajectory_processor_config"], BaseModel):
-                    data["trajectory_processor_config"] = data[
-                        "trajectory_processor_config"
-                    ].model_dump()
-            if "device" not in data:
-                data["device"] = "auto"
-            data["device"] = get_device(data["device"])
+                if trajectory_processor_config_model_type is type(None):
+                    trajectory_processor_config = None
+                else:
+                    trajectory_processor_config = (
+                        trajectory_processor_config_model_type.model_validate(
+                            trajectory_processor_config_raw,
+                            context=experience_buffer.trajectory_processor,
+                        )
+                    )
+            else:
+                trajectory_processor_config = trajectory_processor_config_raw
+            data["trajectory_processor_config"] = trajectory_processor_config
         return data
 
 
@@ -124,12 +138,9 @@ class ExperienceBuffer(
     def load(self, config: DerivedExperienceBufferConfig):
         self.config = config
         self.rng = np.random.RandomState(config.seed)
-        trajectory_processor_config = self.trajectory_processor.validate_config(
-            config.experience_buffer_config.trajectory_processor_config
-        )
         self.trajectory_processor.load(
             DerivedTrajectoryProcessorConfig(
-                trajectory_processor_config=trajectory_processor_config,
+                trajectory_processor_config=config.experience_buffer_config.trajectory_processor_config,
                 agent_controller_name=config.agent_controller_name,
                 dtype=config.dtype,
                 device=config.learner_device,
@@ -244,7 +255,9 @@ class ExperienceBuffer(
         return trajectory_processor_data
 
     # TODO: tensordict?
-    def _get_samples(self, indices) -> Tuple[
+    def _get_samples(
+        self, indices
+    ) -> Tuple[
         Iterable[AgentID],
         Iterable[ObsType],
         Iterable[ActionType],

@@ -43,6 +43,10 @@ class GAETrajectoryProcessorPurePython(
         self.return_stats = WelfordRunningStat(1)
         self.batch_reward_type_numpy_converter = batch_reward_type_numpy_converter
 
+    @property
+    def config_model(self):
+        return GAETrajectoryProcessorConfigModel
+
     def process_trajectories(self, trajectories):
         return_std = (
             self.return_stats.std.squeeze() if self.standardize_returns else None
@@ -123,7 +127,7 @@ class GAETrajectoryProcessorPurePython(
             average_undiscounted_episodic_return=average_episode_return,
             average_return=avg_return,
             return_standard_deviation=return_std,
-            average_reward=avg_reward
+            average_reward=avg_reward,
         )
         return (
             (
@@ -136,9 +140,6 @@ class GAETrajectoryProcessorPurePython(
             ),
             trajectory_processor_data,
         )
-
-    def validate_config(self, config_obj):
-        return GAETrajectoryProcessorConfigModel.model_validate(config_obj)
 
     def load(self, config):
         self.gamma = config.trajectory_processor_config.gamma

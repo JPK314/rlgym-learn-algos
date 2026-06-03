@@ -18,7 +18,6 @@ from rlgym.api import (
 )
 from torch import nn as nn
 
-from rlgym_learn_algos.util.torch_functions import get_device
 from rlgym_learn_algos.util.torch_pydantic import (
     PydanticTorchDevice,
     PydanticTorchDtype,
@@ -39,18 +38,9 @@ class PPOLearnerConfigModel(BaseModel, extra="forbid"):
     clip_range: float = 0.2
     actor_lr: float = 3e-4
     critic_lr: float = 3e-4
-    advantage_normalization: bool = True
-    device: PydanticTorchDevice = "auto"
+    advantage_standardization: bool = True
+    device: PydanticTorchDevice = "cpu"  # pyright: ignore [reportAssignmentType]
     cudnn_benchmark_mode: bool = True
-
-    @model_validator(mode="before")
-    @classmethod
-    def set_device(cls, data):
-        if isinstance(data, dict):
-            if "device" not in data:
-                data["device"] = "auto"
-            data["device"] = get_device(data["device"])
-        return data
 
     @model_validator(mode="after")
     def validate_cudnn_benchmark(self):
@@ -174,12 +164,12 @@ class PPOLearner(
         if self.config.checkpoint_load_folder is not None:
             self._load_from_checkpoint()
             # We want to use the LR from the config, not the checkpoint
-            self.actor_optimizer.param_groups[0][
-                "lr"
-            ] = self.config.learner_config.actor_lr
-            self.critic_optimizer.param_groups[0][
-                "lr"
-            ] = self.config.learner_config.critic_lr
+            self.actor_optimizer.param_groups[0]["lr"] = (
+                self.config.learner_config.actor_lr
+            )
+            self.critic_optimizer.param_groups[0]["lr"] = (
+                self.config.learner_config.critic_lr
+            )
 
         self.minibatch_size = int(
             np.ceil(
@@ -190,9 +180,9 @@ class PPOLearner(
 
     def _load_from_checkpoint(self):
 
-        assert os.path.exists(
-            self.config.checkpoint_load_folder
-        ), f"{self.config.agent_controller_name}: PPO Learner cannot find folder: {self.config.checkpoint_load_folder}"
+        assert os.path.exists(self.config.checkpoint_load_folder), (
+            f"{self.config.agent_controller_name}: PPO Learner cannot find folder: {self.config.checkpoint_load_folder}"
+        )
 
         self.actor.load_state_dict(
             torch.load(
@@ -292,7 +282,7 @@ class PPOLearner(
                     batch_advantages,
                 ) = batch
                 batch_target_values = batch_values + batch_advantages
-                if self.config.learner_config.advantage_normalization:
+                if self.config.learner_config.advantage_standardization:
                     old_device = batch_advantages.device
                     batch_advantages = batch_advantages.to(
                         self.config.learner_config.device

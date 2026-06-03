@@ -22,9 +22,9 @@ class DiscreteFF(Actor[AgentID, np.ndarray, np.ndarray]):
         super().__init__()
         self.device = device
 
-        assert (
-            len(layer_sizes) != 0
-        ), "AT LEAST ONE LAYER MUST BE SPECIFIED TO BUILD THE NEURAL NETWORK!"
+        assert len(layer_sizes) != 0, (
+            "AT LEAST ONE LAYER MUST BE SPECIFIED TO BUILD THE NEURAL NETWORK!"
+        )
         layers = [nn.Linear(input_size, layer_sizes[0]), nn.ReLU()]
         prev_size = layer_sizes[0]
         for size in layer_sizes[1:]:

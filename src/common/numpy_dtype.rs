@@ -39,14 +39,16 @@ impl<'py> IntoPyObject<'py> for NumpyDtype {
     }
 }
 
-impl<'py> FromPyObject<'py> for NumpyDtype {
-    fn extract_bound(ob: &Bound<'py, PyAny>) -> PyResult<Self> {
+impl<'py> FromPyObject<'_, 'py> for NumpyDtype {
+    type Error = PyErr;
+
+    fn extract(ob: Borrowed<'_, 'py, PyAny>) -> PyResult<Self> {
         let py = ob.py();
         let dtype_any = py
             .import(intern!(py, "numpy"))?
             .getattr(intern!(py, "dtype"))?
             .call1((ob,))?;
-        let dtype = dtype_any.downcast::<PyArrayDescr>()?;
+        let dtype = dtype_any.cast::<PyArrayDescr>()?;
         if dtype.is_equiv_to(&i8::get_dtype(py)) {
             Ok(NumpyDtype::INT8)
         } else if dtype.is_equiv_to(&u8::get_dtype(py)) {

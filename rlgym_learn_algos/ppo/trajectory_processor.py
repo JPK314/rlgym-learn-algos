@@ -2,12 +2,15 @@ from abc import abstractmethod
 from dataclasses import dataclass
 from typing import Any, Dict, Generic, List, Optional, Tuple, TypeVar
 
+from pydantic import BaseModel, InstanceOf
 from rlgym.api import ActionType, AgentID, ObsType, RewardType
 from torch import Tensor, device, dtype
 
 from .trajectory import Trajectory
 
-TrajectoryProcessorConfig = TypeVar("TrajectoryProcessorConfig")
+TrajectoryProcessorConfig = TypeVar(
+    "TrajectoryProcessorConfig", bound=InstanceOf[BaseModel]
+)
 TrajectoryProcessorData = TypeVar("TrajectoryProcessorData")
 
 TRAJECTORY_PROCESSOR_FILE = "trajectory_processor.json"
@@ -15,7 +18,7 @@ TRAJECTORY_PROCESSOR_FILE = "trajectory_processor.json"
 
 @dataclass
 class DerivedTrajectoryProcessorConfig(Generic[TrajectoryProcessorConfig]):
-    trajectory_processor_config: TrajectoryProcessorConfig
+    trajectory_processor_config: Optional[TrajectoryProcessorConfig]
     agent_controller_name: str
     dtype: dtype
     device: device
@@ -32,6 +35,13 @@ class TrajectoryProcessor(
         TrajectoryProcessorData,
     ]
 ):
+    @property
+    def config_model(self) -> type[Optional[TrajectoryProcessorConfig]]:
+        """
+        Function to return the config model type that your TrajectoryProcessor implementation uses. Defaults to NoneType.
+        """
+        return type(None)
+
     @abstractmethod
     def process_trajectories(
         self,
@@ -47,10 +57,6 @@ class TrajectoryProcessor(
             TrajectoryProcessorData (for use in the MetricsLogger).
             log prob, value, and advantage tensors should be with dtype=dtype and device=device.
         """
-        raise NotImplementedError
-
-    @abstractmethod
-    def validate_config(self, config_obj: Dict[str, Any]) -> TrajectoryProcessorConfig:
         raise NotImplementedError
 
     def load(self, config: DerivedTrajectoryProcessorConfig[TrajectoryProcessorConfig]):
