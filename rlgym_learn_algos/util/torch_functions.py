@@ -11,15 +11,6 @@ import torch
 import torch.nn as nn
 
 
-def get_device(device: str):
-    if device in ["auto", "gpu"] and torch.cuda.is_available():
-        return "cuda:0"
-    elif device == "auto" and not torch.cuda.is_available():
-        return "cpu"
-    else:
-        return device
-
-
 class MapContinuousToAction(nn.Module):
     """
     A class for policies using the continuous action space. Continuous policies output N*2 values for N actions where

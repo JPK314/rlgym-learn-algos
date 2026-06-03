@@ -6,7 +6,7 @@ on:
       - main
       - master
     tags:
-      - '*'
+      - "*"
   pull_request:
   workflow_dispatch:
 
@@ -42,7 +42,7 @@ jobs:
         with:
           target: ${{ matrix.platform.target }}
           args: --release --out dist --interpreter python-3.10 --interpreter python-3.11 --interpreter python-3.12 --interpreter python-3.13 --interpreter python-3.14
-          sccache: 'true'
+          sccache: "true"
           manylinux: auto
       - name: Upload wheels
         uses: actions/upload-artifact@v4
@@ -73,7 +73,7 @@ jobs:
         with:
           target: ${{ matrix.platform.target }}
           args: --release --out dist --interpreter python-3.10 --interpreter python-3.11 --interpreter python-3.12 --interpreter python-3.13 --interpreter python-3.14
-          sccache: 'true'
+          sccache: "true"
           manylinux: musllinux_1_2
       - name: Upload wheels
         uses: actions/upload-artifact@v4
@@ -102,7 +102,7 @@ jobs:
         with:
           target: ${{ matrix.platform.target }}
           args: --release --out dist
-          sccache: 'true'
+          sccache: "true"
       - name: Upload wheels
         uses: actions/upload-artifact@v4
         with:
@@ -127,7 +127,7 @@ jobs:
         with:
           target: ${{ matrix.platform.target }}
           args: --release --out dist --interpreter python
-          sccache: 'true'
+          sccache: "true"
       - name: Upload wheels
         uses: actions/upload-artifact@v4
         with:

@@ -61,6 +61,10 @@ class GAETrajectoryProcessor(
             batch_reward_type_numpy_converter,
         )
 
+    @property
+    def config_model(self):
+        return GAETrajectoryProcessorConfigModel
+
     def process_trajectories(self, trajectories):
         return_std = self.return_stats.std[0] if self.standardize_returns else 1
         (
@@ -102,9 +106,6 @@ class GAETrajectoryProcessor(
             ),
             trajectory_processor_data,
         )
-
-    def validate_config(self, config_obj):
-        return GAETrajectoryProcessorConfigModel.model_validate(config_obj)
 
     def load(self, config):
         self.gamma = config.trajectory_processor_config.gamma

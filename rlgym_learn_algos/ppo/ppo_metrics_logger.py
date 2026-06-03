@@ -1,7 +1,7 @@
 from typing import Any, Dict, List
 
 from rlgym_learn_algos.logging import DictMetricsLogger
-from rlgym_learn_algos.ppo import PPOAgentControllerData, PPOAgentControllerConfigModel
+from rlgym_learn_algos.ppo import PPOAgentControllerConfigModel, PPOAgentControllerData
 
 from .gae_trajectory_processor import GAETrajectoryProcessorData
 

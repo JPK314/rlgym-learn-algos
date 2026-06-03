@@ -25,9 +25,9 @@ class MultiDiscreteFF(Actor[AgentID, np.ndarray, np.ndarray]):
         self.device = device
         bins = [3, 3, 3, 3, 3, 2, 2, 2]
         n_output_nodes = sum(bins)
-        assert (
-            len(layer_sizes) != 0
-        ), "AT LEAST ONE LAYER MUST BE SPECIFIED TO BUILD THE NEURAL NETWORK!"
+        assert len(layer_sizes) != 0, (
+            "AT LEAST ONE LAYER MUST BE SPECIFIED TO BUILD THE NEURAL NETWORK!"
+        )
         layers = [nn.Linear(input_shape, layer_sizes[0]), nn.ReLU()]
 
         prev_size = layer_sizes[0]

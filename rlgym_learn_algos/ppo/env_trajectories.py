@@ -12,9 +12,9 @@ class EnvTrajectories(Generic[AgentID, ObsType, ActionType, RewardType]):
     def __init__(
         self,
         agent_ids: List[AgentID],
-        agent_choice_fn: Callable[
-            [List[AgentID]], List[int]
-        ] = lambda agent_id_list: list(range(len(agent_id_list))),
+        agent_choice_fn: Callable[[List[AgentID]], List[int]] = lambda agent_id_list: (
+            list(range(len(agent_id_list)))
+        ),
     ) -> None:
         self.used_agent_id_idx_map = {
             agent_ids[idx]: idx for idx in agent_choice_fn(agent_ids)

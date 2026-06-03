@@ -1,7 +1,7 @@
 from abc import abstractmethod
 from typing import Any, Dict, Generic
 
-from rlgym_learn.api import AgentControllerData, AgentControllerConfig
+from rlgym_learn.api import AgentControllerConfig, AgentControllerData
 
 from .metrics_logger import (
     MetricsLogger,

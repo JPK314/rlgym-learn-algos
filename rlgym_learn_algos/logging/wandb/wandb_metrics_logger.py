@@ -2,13 +2,13 @@ import json
 import os
 import time
 from dataclasses import dataclass
-from typing import Any, Dict, Generic, List, Optional, TypeVar, Type, Callable
+from typing import Any, Callable, Dict, Generic, List, Optional, Type, TypeVar
 
 import wandb
-from pydantic import BaseModel, Field, InstanceOf, model_validator, ValidationInfo
+from pydantic import BaseModel, Field, InstanceOf, ValidationInfo, model_validator
 from rlgym_learn.api import (
-    AgentControllerData,
     AgentControllerConfig,
+    AgentControllerData,
     DerivedAgentControllerConfig,
 )
 
@@ -24,7 +24,7 @@ if wandb.__file__ is None:
     raise ModuleNotFoundError("No module named 'wandb'", name="wandb")
 
 InnerMetricsLoggerConfig = TypeVar(
-    "InnerMetricsLoggerConfig", bound=Optional[BaseModel]
+    "InnerMetricsLoggerConfig", bound=InstanceOf[BaseModel]
 )
 
 
@@ -40,7 +40,9 @@ def convert_nested_dict(d):
     return new
 
 
-class WandbMetricsLoggerConfigModel(BaseModel, extra="forbid"):
+class WandbMetricsLoggerConfigModel(
+    BaseModel, Generic[InnerMetricsLoggerConfig], extra="forbid"
+):
     enable: bool = True
     project: str = "rlgym-learn"
     group: str = "unnamed-runs"
@@ -49,24 +51,26 @@ class WandbMetricsLoggerConfigModel(BaseModel, extra="forbid"):
     new_run_with_run_suffix: bool = False
     additional_wandb_run_config: Dict[str, Any] = Field(default_factory=dict)
     settings_kwargs: Dict[str, Any] = Field(default_factory=dict)
-    inner_metrics_logger_config: Optional[InstanceOf[BaseModel]] = None
+    inner_metrics_logger_config: Optional[InnerMetricsLoggerConfig] = None
 
     @model_validator(mode="before")
     @classmethod
     def validate_metrics_logger_config_model(
         cls, data: Any, info: ValidationInfo
     ) -> Any:
-        wandb_metrics_logger: WandbMetricsLogger = info.context
-        if wandb_metrics_logger is None:
-            return data
+        wandb_metrics_logger: Optional[WandbMetricsLogger] = info.context
 
-        if isinstance(data, dict) and "inner_metrics_logger_config" in data:
+        if (
+            wandb_metrics_logger is not None
+            and isinstance(data, dict)
+            and "inner_metrics_logger_config" in data
+        ):
             inner_metrics_logger_config_raw = data["inner_metrics_logger_config"]
             if isinstance(inner_metrics_logger_config_raw, dict):
                 inner_metrics_logger_config_model_type: Type[Optional[BaseModel]] = (
                     wandb_metrics_logger.inner_metrics_logger.config_model
                 )
-                if inner_metrics_logger_config_model_type == type(None):
+                if inner_metrics_logger_config_model_type is type(None):
                     inner_metrics_logger_config = None
                 else:
                     inner_metrics_logger_config = (
@@ -90,7 +94,7 @@ class WandbAdditionalDerivedConfig:
 class WandbMetricsLogger(
     MetricsLogger[
         AgentControllerConfig,
-        WandbMetricsLoggerConfigModel,
+        WandbMetricsLoggerConfigModel[InnerMetricsLoggerConfig],
         AgentControllerData,
     ],
     Generic[AgentControllerConfig, AgentControllerData, InnerMetricsLoggerConfig],
@@ -144,8 +148,8 @@ class WandbMetricsLogger(
         self.inner_metrics_logger.load(
             DerivedMetricsLoggerConfig(
                 derived_agent_controller_config=config.derived_agent_controller_config,
-                checkpoint_load_folder=config.checkpoint_load_folder,
                 metrics_logger_config=config.metrics_logger_config.inner_metrics_logger_config,
+                checkpoint_load_folder=config.checkpoint_load_folder,
             )
         )
         if self.config.checkpoint_load_folder is not None:

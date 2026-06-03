@@ -12,7 +12,7 @@ from typing import Any, Dict, Generic, List, Optional, Tuple, Type
 
 import numpy as np
 import torch
-from pydantic import BaseModel, Field, model_validator, InstanceOf, ValidationInfo
+from pydantic import BaseModel, Field, InstanceOf, ValidationInfo, model_validator
 from rlgym.api import (
     ActionSpaceType,
     ActionType,
@@ -58,7 +58,9 @@ ITERATION_TRAJECTORIES_FILE = "iteration_trajectories.pkl"
 ITERATION_SHARED_INFOS_FILE = "iteration_shared_infos.pkl"
 
 
-class PPOAgentControllerConfigModel(BaseModel, extra="forbid"):
+class PPOAgentControllerConfigModel(
+    BaseModel, Generic[MetricsLoggerConfig], extra="forbid"
+):
     timesteps_per_iteration: int = 50000
     save_every_ts: int = 1_000_000
     run_suffix: str = Field(default_factory=lambda: f"-{time.time_ns()}")
@@ -71,24 +73,27 @@ class PPOAgentControllerConfigModel(BaseModel, extra="forbid"):
         default_factory=ExperienceBufferConfigModel
     )
     run_name: str = "rlgym-learn-run"
-    metrics_logger_config: Optional[InstanceOf[BaseModel]] = None
+    metrics_logger_config: Optional[MetricsLoggerConfig] = None
 
     @model_validator(mode="before")
     @classmethod
     def validate_metrics_logger_config_model(
         cls, data: Any, info: ValidationInfo
     ) -> Any:
-        ppo_agent_controller: PPOAgentController = info.context
-        if ppo_agent_controller is None:
-            return data
+        ppo_agent_controller: Optional[PPOAgentController] = info.context
 
-        if isinstance(data, dict) and "metrics_logger_config" in data:
+        if (
+            ppo_agent_controller is not None
+            and ppo_agent_controller.metrics_logger is not None
+            and isinstance(data, dict)
+            and "metrics_logger_config" in data
+        ):
             metrics_logger_config_raw = data["metrics_logger_config"]
             if isinstance(metrics_logger_config_raw, dict):
                 metrics_logger_config_model_type: Type[Optional[BaseModel]] = (
                     ppo_agent_controller.metrics_logger.config_model
                 )
-                if metrics_logger_config_model_type == type(None):
+                if metrics_logger_config_model_type is type(None):
                     metrics_logger_config = None
                 else:
                     metrics_logger_config = (
@@ -100,6 +105,29 @@ class PPOAgentControllerConfigModel(BaseModel, extra="forbid"):
             else:
                 metrics_logger_config = metrics_logger_config_raw
             data["metrics_logger_config"] = metrics_logger_config
+        return data
+
+    @model_validator(mode="before")
+    @classmethod
+    def validate_experience_buffer_config_model(
+        cls, data: Any, info: ValidationInfo
+    ) -> Any:
+        ppo_agent_controller: Optional[PPOAgentController] = info.context
+
+        if (
+            ppo_agent_controller is not None
+            and isinstance(data, dict)
+            and "experience_buffer_config" in data
+        ):
+            experience_buffer_config_raw = data["experience_buffer_config"]
+            if isinstance(experience_buffer_config_raw, dict):
+                experience_buffer_config = ExperienceBufferConfigModel.model_validate(
+                    experience_buffer_config_raw,
+                    context=ppo_agent_controller.experience_buffer,
+                )
+            else:
+                experience_buffer_config = experience_buffer_config_raw
+            data["experience_buffer_config"] = experience_buffer_config
         return data
 
 
@@ -159,15 +187,15 @@ class PPOAgentController(
         ],
         metrics_logger: Optional[
             MetricsLogger[
-                DerivedAgentControllerConfig[PPOAgentControllerConfigModel],
+                PPOAgentControllerConfigModel,
                 MetricsLoggerConfig,
                 PPOAgentControllerData[TrajectoryProcessorData],
             ]
         ] = None,
         obs_standardizer: Optional[ObsStandardizer] = None,
-        agent_choice_fn: Callable[
-            [List[AgentID]], List[int]
-        ] = lambda agent_id_list: list(range(len(agent_id_list))),
+        agent_choice_fn: Callable[[List[AgentID]], List[int]] = lambda agent_id_list: (
+            list(range(len(agent_id_list)))
+        ),
     ):
         self.learner = PPOLearner(actor_factory, critic_factory)
         self.experience_buffer = experience_buffer
@@ -181,10 +209,10 @@ class PPOAgentController(
 
         self.current_env_trajectories: Dict[
             str,
-            EnvTrajectories[AgentID, ActionType, ObsType, RewardType],
+            EnvTrajectories[AgentID, ObsType, ActionType, RewardType],
         ] = {}
         self.iteration_trajectories: List[
-            Trajectory[AgentID, ActionType, ObsType, RewardType]
+            Trajectory[AgentID, ObsType, ActionType, RewardType]
         ] = []
         self.iteration_shared_infos: List[Dict[str, Any]] = []
         self.cur_iteration = 0
@@ -306,6 +334,9 @@ class PPOAgentController(
         random.seed(self.config.base_config.random_seed)
 
     def _load_from_checkpoint(self):
+        assert self.config.agent_controller_config.checkpoint_load_folder is not None, (
+            "Cannot load from checkpoint when no checkpoint load folder is in config!"
+        )
         try:
             with open(
                 os.path.join(

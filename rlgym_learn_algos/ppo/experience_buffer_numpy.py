@@ -18,7 +18,6 @@ class NumpyExperienceBuffer(
         TrajectoryProcessorData,
     ],
 ):
-
     @staticmethod
     def _cat_numpy(t1, t2, size):
         t2 = np.array(t2)

@@ -1,24 +1,22 @@
 from abc import abstractmethod
 from dataclasses import dataclass
 from os import PathLike
-from typing import Any, Dict, Generic, List, Optional, TypeVar, Type, Callable
-from pydantic import BaseModel
+from typing import Any, Dict, Generic, List, Optional, Type, TypeVar
 
+from pydantic import BaseModel, InstanceOf
 from rlgym_learn.api import (
-    AgentControllerData,
     AgentControllerConfig,
+    AgentControllerData,
     DerivedAgentControllerConfig,
 )
 
-MetricsLoggerConfig = TypeVar("MetricsLoggerConfig", bound=Optional[BaseModel])
+MetricsLoggerConfig = TypeVar("MetricsLoggerConfig", bound=InstanceOf[BaseModel])
 
 
 @dataclass
 class DerivedMetricsLoggerConfig(Generic[AgentControllerConfig, MetricsLoggerConfig]):
-    derived_agent_controller_config: DerivedAgentControllerConfig[
-        AgentControllerConfig
-    ] = None
-    metrics_logger_config: MetricsLoggerConfig = None
+    derived_agent_controller_config: DerivedAgentControllerConfig[AgentControllerConfig]
+    metrics_logger_config: Optional[MetricsLoggerConfig] = None
     checkpoint_load_folder: Optional[str] = None
 
 
@@ -43,7 +41,7 @@ class MetricsLogger(
     """
 
     @property
-    def config_model(self) -> Type[MetricsLoggerConfig]:
+    def config_model(self) -> Type[Optional[MetricsLoggerConfig]]:
         """
         Function to return the config model type that your MetricsLogger implementation uses. Defaults to NoneType.
         """
