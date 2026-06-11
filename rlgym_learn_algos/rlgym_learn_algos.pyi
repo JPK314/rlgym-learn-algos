@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Generic, List, Tuple
+from typing import TYPE_CHECKING, Generic
 
-from numpy import dtype, ndarray
+from numpy import dtype, float32, float64, ndarray
 from rlgym.api import ActionType, AgentID, ObsType, RewardType
 
 from rlgym_learn_algos.stateful_functions import BatchRewardTypeNumpyConverter
@@ -19,17 +19,18 @@ class DerivedGAETrajectoryProcessorConfig:
 
 class GAETrajectoryProcessor(Generic[AgentID, ObsType, ActionType, RewardType]):
     def __new__(
-        cls, batch_reward_type_numpy_converter: BatchRewardTypeNumpyConverter
-    ) -> GAETrajectoryProcessor: ...
-    def load(self, config: DerivedGAETrajectoryProcessorConfig): ...
+        cls,
+        batch_reward_type_numpy_converter: BatchRewardTypeNumpyConverter[RewardType],
+    ) -> GAETrajectoryProcessor[AgentID, ObsType, ActionType, RewardType]: ...
+    def load(self, config: DerivedGAETrajectoryProcessorConfig) -> None: ...
     def process_trajectories(
         self,
-        trajectories: List[Trajectory[AgentID, ObsType, ActionType, RewardType]],
-        return_std: ndarray,
-    ) -> Tuple[
-        List[AgentID],
-        List[ObsType],
-        List[ActionType],
+        trajectories: list[Trajectory[AgentID, ObsType, ActionType, RewardType]],
+        return_std: float32 | float64,
+    ) -> tuple[
+        list[AgentID],
+        list[ObsType],
+        list[ActionType],
         Tensor,
         Tensor,
         ndarray,

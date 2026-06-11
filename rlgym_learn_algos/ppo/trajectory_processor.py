@@ -1,15 +1,17 @@
-from abc import abstractmethod
+# pyright: reportUnusedParameter=false
 from dataclasses import dataclass
-from typing import Any, Dict, Generic, List, Optional, Tuple, TypeVar
+from os import PathLike
+from typing import Generic
 
 from pydantic import BaseModel, InstanceOf
 from rlgym.api import ActionType, AgentID, ObsType, RewardType
 from torch import Tensor, device, dtype
+from typing_extensions import TypeVar
 
 from .trajectory import Trajectory
 
 TrajectoryProcessorConfig = TypeVar(
-    "TrajectoryProcessorConfig", bound=InstanceOf[BaseModel]
+    "TrajectoryProcessorConfig", bound=InstanceOf[BaseModel] | None
 )
 TrajectoryProcessorData = TypeVar("TrajectoryProcessorData")
 
@@ -18,11 +20,11 @@ TRAJECTORY_PROCESSOR_FILE = "trajectory_processor.json"
 
 @dataclass
 class DerivedTrajectoryProcessorConfig(Generic[TrajectoryProcessorConfig]):
-    trajectory_processor_config: Optional[TrajectoryProcessorConfig]
+    trajectory_processor_config: TrajectoryProcessorConfig
     agent_controller_name: str
     dtype: dtype
     device: device
-    checkpoint_load_folder: Optional[str] = None
+    checkpoint_load_folder: str | None = None
 
 
 class TrajectoryProcessor(
@@ -36,18 +38,17 @@ class TrajectoryProcessor(
     ]
 ):
     @property
-    def config_model(self) -> type[Optional[TrajectoryProcessorConfig]]:
+    def config_model(self) -> type[TrajectoryProcessorConfig] | None:
         """
-        Function to return the config model type that your TrajectoryProcessor implementation uses. Defaults to NoneType.
+        Function to return the config model type that your TrajectoryProcessor implementation uses. Defaults to None.
         """
-        return type(None)
+        return None
 
-    @abstractmethod
     def process_trajectories(
         self,
-        trajectories: List[Trajectory[AgentID, ActionType, ObsType, RewardType]],
-    ) -> Tuple[
-        Tuple[List[AgentID], List[ObsType], List[ActionType], Tensor, Tensor, Tensor],
+        trajectories: list[Trajectory[AgentID, ObsType, ActionType, RewardType]],
+    ) -> tuple[
+        tuple[list[AgentID], list[ObsType], list[ActionType], Tensor, Tensor, Tensor],
         TrajectoryProcessorData,
     ]:
         """
@@ -62,5 +63,5 @@ class TrajectoryProcessor(
     def load(self, config: DerivedTrajectoryProcessorConfig[TrajectoryProcessorConfig]):
         pass
 
-    def save_checkpoint(self, folder_path):
+    def save_checkpoint(self, folder_path: str | PathLike[str]):
         pass

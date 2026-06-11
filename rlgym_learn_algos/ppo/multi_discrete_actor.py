@@ -7,12 +7,14 @@ Description:
     available in Rocket League.
 """
 
-from typing import Iterable, List, Tuple
+from collections.abc import Iterable, Sequence
+from typing import Any
 
 import numpy as np
 import torch
 import torch.nn as nn
 from rlgym.api import AgentID
+from typing_extensions import override
 
 from rlgym_learn_algos.util import torch_functions
 
@@ -20,9 +22,11 @@ from .actor import Actor
 
 
 class MultiDiscreteFF(Actor[AgentID, np.ndarray, np.ndarray]):
-    def __init__(self, input_shape, layer_sizes, device):
+    def __init__(
+        self, input_shape: int, layer_sizes: tuple[int, ...], device: torch.device
+    ):
         super().__init__()
-        self.device = device
+        self.device: torch.device = device
         bins = [3, 3, 3, 3, 3, 2, 2, 2]
         n_output_nodes = sum(bins)
         assert len(layer_sizes) != 0, (
@@ -37,31 +41,38 @@ class MultiDiscreteFF(Actor[AgentID, np.ndarray, np.ndarray]):
             prev_size = size
 
         layers.append(nn.Linear(layer_sizes[-1], n_output_nodes))
-        self.model = nn.Sequential(*layers).to(self.device)
-        self.splits = bins
-        self.multi_discrete = torch_functions.MultiDiscreteRolv(bins)
+        self.model: nn.Module = nn.Sequential(*layers).to(self.device)
+        self.splits: list[int] = bins
+        self.multi_discrete: torch_functions.MultiDiscreteRolv = (
+            torch_functions.MultiDiscreteRolv(bins)
+        )
 
-    def get_output(self, obs_list: List[np.ndarray]):
+    def get_output(self, obs_list: Sequence[np.ndarray]) -> torch.Tensor:
         obs = torch.as_tensor(
             np.array(obs_list), dtype=torch.float32, device=self.device
         )
         policy_output = self.model(obs)
         return policy_output
 
+    @override
     def get_action(
-        self, agent_id_list, obs_list, **kwargs
-    ) -> Tuple[Iterable[np.ndarray], torch.Tensor]:
+        self,
+        agent_id_list: Sequence[AgentID],
+        obs_list: Sequence[np.ndarray],
+        **kwargs: dict[str, Any],
+    ) -> tuple[Iterable[np.ndarray], torch.Tensor]:
         logits = self.get_output(obs_list)
 
         # TODO not sure how to do this better - very slow atm
         if "deterministic" in kwargs and kwargs["deterministic"]:
             start = 0
-            action = []
+            actions: list[torch.Tensor] = []
             for split in self.splits:
-                action.append(logits[..., start : start + split].argmax(dim=-1))
+                actions.append(logits[..., start : start + split].argmax(dim=-1))
                 start += split
-            action = torch.stack(action).cpu().numpy()
-            return action, 0
+            return torch.stack(actions).cpu().numpy(), torch.as_tensor(
+                [0] * len(agent_id_list), dtype=torch.float32
+            )
 
         distribution = self.multi_discrete
         distribution.make_distribution(logits)
@@ -73,9 +84,14 @@ class MultiDiscreteFF(Actor[AgentID, np.ndarray, np.ndarray]):
         # Returned log prob shape: (L) where L is the batching dimension (parallel with obs_list)
         return action.cpu().numpy(), log_prob.cpu()
 
+    @override
     def get_backprop_data(
-        self, agent_id_list, obs_list, acts, **kwargs
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        self,
+        agent_id_list: Sequence[AgentID],
+        obs_list: Sequence[np.ndarray],
+        acts: Sequence[np.ndarray],
+        **kwargs: dict[str, Any],
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         logits = self.get_output(obs_list)
         acts_tensor = torch.as_tensor(np.array(acts)).to(self.device)
 

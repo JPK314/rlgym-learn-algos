@@ -3,12 +3,13 @@ from __future__ import annotations
 import json
 import os
 from dataclasses import dataclass
+from typing import cast
 
 import numpy as np
 import torch
-from numpy import ndarray
 from pydantic import BaseModel
 from rlgym.api import ActionType, AgentID, ObsType, RewardType
+from typing_extensions import override
 
 from rlgym_learn_algos.stateful_functions import (
     BatchRewardTypeNumpyConverter,
@@ -17,7 +18,12 @@ from rlgym_learn_algos.stateful_functions import (
 from rlgym_learn_algos.util.running_stats import WelfordRunningStat
 
 from ..ppo import RustDerivedGAETrajectoryProcessorConfig, RustGAETrajectoryProcessor
-from .trajectory_processor import TRAJECTORY_PROCESSOR_FILE, TrajectoryProcessor
+from .trajectory import Trajectory
+from .trajectory_processor import (
+    TRAJECTORY_PROCESSOR_FILE,
+    DerivedTrajectoryProcessorConfig,
+    TrajectoryProcessor,
+)
 
 
 class GAETrajectoryProcessorConfigModel(BaseModel, extra="forbid"):
@@ -47,26 +53,52 @@ class GAETrajectoryProcessor(
 ):
     def __init__(
         self,
-        batch_reward_type_numpy_converter: BatchRewardTypeNumpyConverter[
-            RewardType
-        ] = BatchRewardTypeSimpleNumpyConverter(),
+        batch_reward_type_numpy_converter: BatchRewardTypeNumpyConverter[RewardType]
+        | None = None,
     ):
         """
-        :param batch_reward_type_numpy_converter: BatchRewardTypeNumpyConverter instance
+        :param batch_reward_type_numpy_converter: Instance of BatchRewardTypeNumpyConverter to use.
         """
-        self.return_stats = WelfordRunningStat(1)
+        self.return_stats: WelfordRunningStat = WelfordRunningStat((1,))
         self.rust_gae_trajectory_processor: RustGAETrajectoryProcessor[
             AgentID, ObsType, ActionType, RewardType
         ] = RustGAETrajectoryProcessor(
-            batch_reward_type_numpy_converter,
+            batch_reward_type_numpy_converter
+            if batch_reward_type_numpy_converter is not None
+            else BatchRewardTypeSimpleNumpyConverter(),
         )
+        self.config: (
+            DerivedTrajectoryProcessorConfig[GAETrajectoryProcessorConfigModel] | None
+        ) = None
 
     @property
+    @override
     def config_model(self):
         return GAETrajectoryProcessorConfigModel
 
-    def process_trajectories(self, trajectories):
-        return_std = self.return_stats.std[0] if self.standardize_returns else 1
+    @override
+    def process_trajectories(
+        self, trajectories: list[Trajectory[AgentID, ObsType, ActionType, RewardType]]
+    ) -> tuple[
+        tuple[
+            list[AgentID],
+            list[ObsType],
+            list[ActionType],
+            torch.Tensor,
+            torch.Tensor,
+            torch.Tensor,
+        ],
+        GAETrajectoryProcessorData,
+    ]:
+        assert self.config is not None, (
+            "Cannot process trajectories before calling load with config!"
+        )
+        return_std = cast(
+            np.float32,
+            self.return_stats.std[0]
+            if self.config.trajectory_processor_config.standardize_returns
+            else 1,
+        )
         (
             agent_id_list,
             observation_list,
@@ -81,10 +113,11 @@ class GAETrajectoryProcessor(
             trajectories, return_std
         )
 
-        if self.standardize_returns:
+        if self.config.trajectory_processor_config.standardize_returns:
             # Update the running statistics about the returns.
             n_to_increment = min(
-                self.max_returns_per_stats_increment, len(return_array)
+                self.config.trajectory_processor_config.max_returns_per_stats_increment,
+                len(return_array),
             )
 
             for sample in return_array[:n_to_increment]:
@@ -100,48 +133,52 @@ class GAETrajectoryProcessor(
                 agent_id_list,
                 observation_list,
                 action_list,
-                log_probs.to(device=self.device),
-                value_preds.to(device=self.device),
-                torch.from_numpy(advantage_array).to(device=self.device),
+                log_probs.to(device=self.config.device),
+                value_preds.to(device=self.config.device),
+                torch.from_numpy(advantage_array).to(device=self.config.device),  # pyright: ignore [reportUnknownMemberType]
             ),
             trajectory_processor_data,
         )
 
-    def load(self, config):
-        self.gamma = config.trajectory_processor_config.gamma
-        self.lmbda = config.trajectory_processor_config.lmbda
-        self.standardize_returns = (
-            config.trajectory_processor_config.standardize_returns
-        )
-        self.max_returns_per_stats_increment = (
-            config.trajectory_processor_config.max_returns_per_stats_increment
-        )
-        self.agent_controller_name = config.agent_controller_name
-        self.dtype = config.dtype
-        self.device = config.device
-        self.checkpoint_load_folder = config.checkpoint_load_folder
-        if self.checkpoint_load_folder is not None:
+    @override
+    def load(
+        self,
+        config: DerivedTrajectoryProcessorConfig[GAETrajectoryProcessorConfigModel],
+    ):
+        self.config = config
+        if config.checkpoint_load_folder is not None:
             self._load_from_checkpoint()
         self.rust_gae_trajectory_processor.load(
             RustDerivedGAETrajectoryProcessorConfig(
-                self.gamma, self.lmbda, np.dtype(str(self.dtype)[6:])
+                config.trajectory_processor_config.gamma,
+                config.trajectory_processor_config.lmbda,
+                np.dtype(str(config.dtype).replace("torch.", "")),
             )
         )
 
     def _load_from_checkpoint(self):
+        assert self.config is not None, (
+            "Cannot load from checkpoint before calling load with config!"
+        )
+        assert self.config.checkpoint_load_folder is not None, (
+            "Cannot load from checkpoint if checkpoint load folder is None!"
+        )
         try:
             with open(
-                os.path.join(self.checkpoint_load_folder, TRAJECTORY_PROCESSOR_FILE),
+                os.path.join(
+                    self.config.checkpoint_load_folder, TRAJECTORY_PROCESSOR_FILE
+                ),
                 "rt",
             ) as f:
                 state = json.load(f)
             self.return_stats.load_state_dict(state["return_running_stats"])
         except FileNotFoundError:
             print(
-                f"{self.agent_controller_name}: Tried to load trajectory processor from checkpoint using the trajectory processor file at location {str(os.path.join(self.checkpoint_load_folder, TRAJECTORY_PROCESSOR_FILE))}, but there is no such file! Running stats will be initialized as if this were a new run instead."
+                f"{self.config.agent_controller_name}: Tried to load trajectory processor from checkpoint using the trajectory processor file at location {str(os.path.join(self.config.checkpoint_load_folder, TRAJECTORY_PROCESSOR_FILE))}, but there is no such file! Running stats will be initialized as if this were a new run instead."
             )
 
-    def save_checkpoint(self, folder_path):
+    @override
+    def save_checkpoint(self, folder_path: str | os.PathLike[str]):
         state = {
             "return_running_stats": self.return_stats.state_dict(),
         }

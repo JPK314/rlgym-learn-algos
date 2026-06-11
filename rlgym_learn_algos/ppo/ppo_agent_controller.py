@@ -6,13 +6,13 @@ import pickle
 import random
 import shutil
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
-from typing import Any, Dict, Generic, List, Optional, Tuple, Type
+from typing import Any, Generic, TypedDict, cast
 
 import numpy as np
 import torch
-from pydantic import BaseModel, Field, InstanceOf, ValidationInfo, model_validator
+from pydantic import BaseModel, Field, ValidationInfo, model_validator
 from rlgym.api import (
     ActionSpaceType,
     ActionType,
@@ -25,6 +25,7 @@ from rlgym.api import (
 from rlgym_learn import EnvActionResponse, EnvActionResponseType, Timestep
 from rlgym_learn.api import AgentController, DerivedAgentControllerConfig
 from torch import device as _device
+from typing_extensions import override
 
 from rlgym_learn_algos.logging import (
     DerivedMetricsLoggerConfig,
@@ -59,75 +60,80 @@ ITERATION_SHARED_INFOS_FILE = "iteration_shared_infos.pkl"
 
 
 class PPOAgentControllerConfigModel(
-    BaseModel, Generic[MetricsLoggerConfig], extra="forbid"
+    BaseModel, Generic[TrajectoryProcessorConfig, MetricsLoggerConfig], extra="forbid"
 ):
     timesteps_per_iteration: int = 50000
     save_every_ts: int = 1_000_000
     run_suffix: str = Field(default_factory=lambda: f"-{time.time_ns()}")
-    checkpoint_load_folder: Optional[str] = None
+    checkpoint_load_folder: str | None = None
     n_checkpoints_to_keep: int = 5
     random_seed: int = 123
     save_mid_iteration_data_in_checkpoint: bool = True
-    learner_config: PPOLearnerConfigModel = Field(default_factory=PPOLearnerConfigModel)
-    experience_buffer_config: ExperienceBufferConfigModel = Field(
-        default_factory=ExperienceBufferConfigModel
+    learner_config: PPOLearnerConfigModel = Field(
+        default_factory=lambda: PPOLearnerConfigModel()
+    )
+    experience_buffer_config: ExperienceBufferConfigModel[TrajectoryProcessorConfig] = (
+        Field(default_factory=lambda: ExperienceBufferConfigModel())  # pyright: ignore [reportAssignmentType]
     )
     run_name: str = "rlgym-learn-run"
-    metrics_logger_config: Optional[MetricsLoggerConfig] = None
+    metrics_logger_config: MetricsLoggerConfig = None  # pyright: ignore [reportAssignmentType]
 
     @model_validator(mode="before")
     @classmethod
-    def validate_metrics_logger_config_model(
+    def validate_metrics_logger_and_experience_buffer_config_models(
         cls, data: Any, info: ValidationInfo
     ) -> Any:
-        ppo_agent_controller: Optional[PPOAgentController] = info.context
-
-        if (
-            ppo_agent_controller is not None
-            and ppo_agent_controller.metrics_logger is not None
-            and isinstance(data, dict)
-            and "metrics_logger_config" in data
-        ):
-            metrics_logger_config_raw = data["metrics_logger_config"]
-            if isinstance(metrics_logger_config_raw, dict):
-                metrics_logger_config_model_type: Type[Optional[BaseModel]] = (
-                    ppo_agent_controller.metrics_logger.config_model
-                )
-                if metrics_logger_config_model_type is type(None):
-                    metrics_logger_config = None
-                else:
-                    metrics_logger_config = (
-                        metrics_logger_config_model_type.model_validate(
+        ppo_agent_controller: (
+            PPOAgentController[
+                TrajectoryProcessorConfig,
+                MetricsLoggerConfig,
+                Any,
+                Any,
+                Any,
+                Any,
+                Any,
+                Any,
+                Any,
+                Any,
+            ]
+            | None
+        ) = info.context
+        data_dict = data
+        if ppo_agent_controller is not None and isinstance(data_dict, dict):
+            data_dict = cast(dict[Any, Any], data_dict)
+            if (
+                ppo_agent_controller.metrics_logger is not None
+                and "metrics_logger_config" in data_dict
+            ):
+                metrics_logger_config_raw = data_dict["metrics_logger_config"]
+                if isinstance(metrics_logger_config_raw, dict):
+                    metrics_logger_config_model_type = (
+                        ppo_agent_controller.metrics_logger.config_model
+                    )
+                    if metrics_logger_config_model_type is None:
+                        metrics_logger_config = None
+                    else:
+                        metrics_logger_config = cast(
+                            BaseModel, metrics_logger_config_model_type
+                        ).model_validate(
                             metrics_logger_config_raw,
                             context=ppo_agent_controller.metrics_logger,
                         )
+                else:
+                    metrics_logger_config = metrics_logger_config_raw
+                data_dict["metrics_logger_config"] = metrics_logger_config
+            if "experience_buffer_config" in data_dict:
+                experience_buffer_config_raw = data_dict["experience_buffer_config"]
+                if isinstance(experience_buffer_config_raw, dict):
+                    experience_buffer_config = ExperienceBufferConfigModel[
+                        TrajectoryProcessorConfig
+                    ].model_validate(
+                        experience_buffer_config_raw,
+                        context=ppo_agent_controller.experience_buffer,
                     )
-            else:
-                metrics_logger_config = metrics_logger_config_raw
-            data["metrics_logger_config"] = metrics_logger_config
-        return data
-
-    @model_validator(mode="before")
-    @classmethod
-    def validate_experience_buffer_config_model(
-        cls, data: Any, info: ValidationInfo
-    ) -> Any:
-        ppo_agent_controller: Optional[PPOAgentController] = info.context
-
-        if (
-            ppo_agent_controller is not None
-            and isinstance(data, dict)
-            and "experience_buffer_config" in data
-        ):
-            experience_buffer_config_raw = data["experience_buffer_config"]
-            if isinstance(experience_buffer_config_raw, dict):
-                experience_buffer_config = ExperienceBufferConfigModel.model_validate(
-                    experience_buffer_config_raw,
-                    context=ppo_agent_controller.experience_buffer,
-                )
-            else:
-                experience_buffer_config = experience_buffer_config_raw
-            data["experience_buffer_config"] = experience_buffer_config
+                else:
+                    experience_buffer_config = experience_buffer_config_raw
+                data_dict["experience_buffer_config"] = experience_buffer_config
         return data
 
 
@@ -144,9 +150,17 @@ class PPOAgentControllerData(Generic[TrajectoryProcessorData]):
     percent_truncated: float
 
 
+class PPOAgentStateDict(TypedDict):
+    cur_iteration: int
+    iteration_timesteps: int
+    cumulative_timesteps: int
+    iteration_start_time: float
+    timestep_collection_start_time: float
+
+
 class PPOAgentController(
     AgentController[
-        PPOAgentControllerConfigModel,
+        PPOAgentControllerConfigModel[TrajectoryProcessorConfig, MetricsLoggerConfig],
         AgentID,
         ObsType,
         ActionType,
@@ -185,56 +199,104 @@ class PPOAgentController(
             RewardType,
             TrajectoryProcessorData,
         ],
-        metrics_logger: Optional[
-            MetricsLogger[
-                PPOAgentControllerConfigModel,
-                MetricsLoggerConfig,
-                PPOAgentControllerData[TrajectoryProcessorData],
-            ]
-        ] = None,
-        obs_standardizer: Optional[ObsStandardizer] = None,
-        agent_choice_fn: Callable[[List[AgentID]], List[int]] = lambda agent_id_list: (
+        metrics_logger: MetricsLogger[
+            PPOAgentControllerConfigModel[
+                TrajectoryProcessorConfig, MetricsLoggerConfig
+            ],
+            MetricsLoggerConfig,
+            PPOAgentControllerData[TrajectoryProcessorData],
+        ]
+        | None = None,
+        obs_standardizer: ObsStandardizer[AgentID, ObsType] | None = None,
+        agent_choice_fn: Callable[[list[AgentID]], list[int]] = lambda agent_id_list: (
             list(range(len(agent_id_list)))
         ),
     ):
-        self.learner = PPOLearner(actor_factory, critic_factory)
-        self.experience_buffer = experience_buffer
-        self.metrics_logger = metrics_logger
-        self.obs_standardizer = obs_standardizer
+        super().__init__()
+        self.learner: PPOLearner[
+            TrajectoryProcessorConfig,
+            AgentID,
+            ObsType,
+            ActionType,
+            RewardType,
+            ObsSpaceType,
+            ActionSpaceType,
+            TrajectoryProcessorData,
+        ] = PPOLearner(actor_factory, critic_factory)
+        self.experience_buffer: ExperienceBuffer[
+            TrajectoryProcessorConfig,
+            AgentID,
+            ObsType,
+            ActionType,
+            RewardType,
+            TrajectoryProcessorData,
+        ] = experience_buffer
+        self.metrics_logger: (
+            MetricsLogger[
+                PPOAgentControllerConfigModel[
+                    TrajectoryProcessorConfig, MetricsLoggerConfig
+                ],
+                MetricsLoggerConfig,
+                PPOAgentControllerData[TrajectoryProcessorData],
+            ]
+            | None
+        ) = metrics_logger
+        self.obs_standardizer: ObsStandardizer[AgentID, ObsType] | None = (
+            obs_standardizer
+        )
         if obs_standardizer is not None:
             print(
                 "Warning: using an obs standardizer is slow! It is recommended to design your obs to be standardized (i.e. have approximately mean 0 and std 1 for each value) without needing this extra post-processing step."
             )
-        self.agent_choice_fn = agent_choice_fn
+        self.agent_choice_fn: Callable[[list[AgentID]], list[int]] = agent_choice_fn
 
-        self.current_env_trajectories: Dict[
+        self.current_env_trajectories: dict[
             str,
             EnvTrajectories[AgentID, ObsType, ActionType, RewardType],
         ] = {}
-        self.iteration_trajectories: List[
+        self.iteration_trajectories: list[
             Trajectory[AgentID, ObsType, ActionType, RewardType]
         ] = []
-        self.iteration_shared_infos: List[Dict[str, Any]] = []
-        self.cur_iteration = 0
-        self.iteration_timesteps = 0
-        self.cumulative_timesteps = 0
+        self.iteration_shared_infos: list[dict[str, Any] | None] = []
+        self.cur_iteration: int = 0
+        self.iteration_timesteps: int = 0
+        self.cumulative_timesteps: int = 0
         cur_time = time.perf_counter()
-        self.iteration_start_time = cur_time
-        self.timestep_collection_start_time = cur_time
-        self.ts_since_last_save = 0
-        self.iteration_total_episodes = 0
-        self.iteration_truncated_episodes = 0
-        self.iteration_natural_episode_lengths: List[int] = []
+        self.iteration_start_time: float = cur_time
+        self.timestep_collection_start_time: float = cur_time
+        self.timestep_collection_end_time: float
+        self.ts_since_last_save: int = 0
+        self.iteration_total_episodes: int = 0
+        self.iteration_truncated_episodes: int = 0
+        self.iteration_natural_episode_lengths: list[int] = []
+        self.obs_space: ObsSpaceType
+        self.action_space: ActionSpaceType
+        self.config: DerivedAgentControllerConfig[
+            PPOAgentControllerConfigModel[
+                TrajectoryProcessorConfig, MetricsLoggerConfig
+            ]
+        ]
+        self.checkpoints_save_folder: str
 
     @property
+    @override
     def config_model(self):
         return PPOAgentControllerConfigModel
 
-    def set_space_types(self, obs_space, action_space):
+    @override
+    def set_space_types(self, obs_space: ObsSpaceType, action_space: ActionSpaceType):
         self.obs_space = obs_space
         self.action_space = action_space
 
-    def load(self, config):
+    @override
+    def load(
+        self,
+        config: DerivedAgentControllerConfig[
+            PPOAgentControllerConfigModel[
+                TrajectoryProcessorConfig, MetricsLoggerConfig
+            ]
+        ],
+    ):
         self.config = config
         print(
             f"{self.config.agent_controller_name}: Using device {config.agent_controller_config.learner_config.device}"
@@ -329,7 +391,7 @@ class PPOAgentController(
         if agent_controller_config.checkpoint_load_folder is not None:
             self._load_from_checkpoint()
 
-        torch.manual_seed(self.config.base_config.random_seed)
+        _ = torch.manual_seed(self.config.base_config.random_seed)  # pyright: ignore [reportUnknownMemberType]
         np.random.seed(self.config.base_config.random_seed)
         random.seed(self.config.base_config.random_seed)
 
@@ -345,7 +407,7 @@ class PPOAgentController(
                 ),
                 "rb",
             ) as f:
-                iteration_trajectories: List[
+                iteration_trajectories: list[
                     Trajectory[AgentID, ObsType, ActionType, RewardType]
                 ] = pickle.load(f)
         except FileNotFoundError:
@@ -361,7 +423,7 @@ class PPOAgentController(
                 ),
                 "rb",
             ) as f:
-                iteration_shared_infos: List[Dict[str, Any]] = pickle.load(f)
+                iteration_shared_infos: list[dict[str, Any] | None] = pickle.load(f)
         except FileNotFoundError:
             print(
                 f"{self.config.agent_controller_name}: Tried to load iteration shared info data from checkpoint using the file at location {str(os.path.join(self.config.agent_controller_config.checkpoint_load_folder, ITERATION_SHARED_INFOS_FILE))}, but there is no such file! Iteration shared info data will be initialized as an empty list instead."
@@ -375,7 +437,7 @@ class PPOAgentController(
                 ),
                 "rt",
             ) as f:
-                state = json.load(f)
+                state: PPOAgentStateDict = json.load(f)
         except FileNotFoundError:
             print(
                 f"{self.config.agent_controller_name}: Tried to load PPO agent miscellaneous state data from checkpoint using the file at location {str(os.path.join(self.config.agent_controller_config.checkpoint_load_folder, PPO_AGENT_FILE))}, but there is no such file! This state data will be initialized as if this were a new run instead."
@@ -397,6 +459,7 @@ class PPOAgentController(
         self.iteration_start_time = state["iteration_start_time"]
         self.timestep_collection_start_time = state["timestep_collection_start_time"]
 
+    @override
     def save_checkpoint(self):
         print(f"Saving checkpoint {self.cumulative_timesteps}...")
 
@@ -453,38 +516,58 @@ class PPOAgentController(
                     os.path.join(self.checkpoints_save_folder, str(checkpoint_name))
                 )
 
-    def choose_agents(self, agent_id_list):
+    @override
+    def choose_agents(self, agent_id_list: list[AgentID]):
         return self.agent_choice_fn(agent_id_list)
 
     @torch.no_grad
-    def get_actions(self, agent_id_list, obs_list):
+    @override
+    def get_actions(
+        self, agent_id_list: list[AgentID], obs_list: list[ObsType]
+    ) -> tuple[Iterable[ActionType], torch.Tensor]:
         action_list, log_probs = self.learner.actor.get_action(agent_id_list, obs_list)
         if log_probs.dim() == 0:
             # This can happen if the input is a single element
             log_probs = log_probs.unsqueeze(0)
         return (action_list, log_probs)
 
-    def standardize_timestep_observations(
+    def _standardize_timestep_observations(
         self,
-        timesteps: List[Timestep[AgentID, ObsType, ActionType, RewardType]],
+        timesteps: list[Timestep[AgentID, ObsType, ActionType, RewardType]],
     ):
-        agent_id_list = [None] * (2 * len(timesteps))
-        obs_list = [None] * len(agent_id_list)
+        if self.obs_standardizer is None:
+            return
+        agent_id_list: list[AgentID | None] = [None] * (2 * len(timesteps))
+        obs_list: list[ObsType | None] = [None] * len(agent_id_list)
         for timestep_idx, timestep in enumerate(timesteps):
             agent_id_list[2 * timestep_idx] = timestep.agent_id
             agent_id_list[2 * timestep_idx + 1] = timestep.agent_id
             obs_list[2 * timestep_idx] = timestep.obs
             obs_list[2 * timestep_idx + 1] = timestep.next_obs
-        standardized_obs = self.obs_standardizer.standardize(agent_id_list, obs_list)
+        standardized_obs = self.obs_standardizer.standardize(
+            cast(list[AgentID], agent_id_list), cast(list[ObsType], obs_list)
+        )
         for obs_idx, obs in enumerate(standardized_obs):
             if obs_idx % 2 == 0:
                 timesteps[obs_idx // 2].obs = obs
             else:
                 timesteps[obs_idx // 2].next_obs = obs
 
-    def process_timestep_data(self, timestep_data):
+    @override
+    def process_timestep_data(
+        self,
+        timestep_data: dict[
+            str,
+            tuple[
+                list[Timestep[AgentID, ObsType, ActionType, RewardType]],
+                torch.Tensor | None,
+                dict[str, Any] | None,
+                StateType | None,
+            ],
+        ],
+    ):
         timesteps_added = 0
-        shared_infos: List[Dict[str, Any]] = []
+        shared_infos: list[dict[str, Any] | None] = []
         for env_id, (
             env_timesteps,
             env_log_probs,
@@ -492,15 +575,16 @@ class PPOAgentController(
             _,
         ) in timestep_data.items():
             if self.obs_standardizer is not None:
-                self.standardize_timestep_observations(env_timesteps)
+                self._standardize_timestep_observations(env_timesteps)
             if env_timesteps:
                 if env_id not in self.current_env_trajectories:
                     self.current_env_trajectories[env_id] = EnvTrajectories(
                         [timestep.agent_id for timestep in env_timesteps],
                         self.agent_choice_fn,
                     )
+                # ActionAssociatedLearningData will always be non-None for step actions, which is the only time env_timesteps will be non-None
                 timesteps_added += self.current_env_trajectories[env_id].add_steps(
-                    env_timesteps, env_log_probs
+                    env_timesteps, cast(torch.Tensor, env_log_probs)
                 )
             shared_infos.append(env_shared_info)
         self.iteration_timesteps += timesteps_added
@@ -517,8 +601,20 @@ class PPOAgentController(
             self.save_checkpoint()
             self.ts_since_last_save = 0
 
-    def choose_env_actions(self, state_info):
-        env_action_responses = {}
+    @override
+    def choose_env_actions(
+        self,
+        state_info: dict[
+            str,
+            tuple[
+                dict[str, Any] | None,
+                StateType | None,
+                dict[AgentID, bool] | None,
+                dict[AgentID, bool] | None,
+            ],
+        ],
+    ):
+        env_action_responses: dict[str, EnvActionResponse[AgentID, StateType]] = {}
         for env_id in state_info:
             if env_id not in self.current_env_trajectories:
                 # This must be the first env action after a reset, so we step
@@ -544,7 +640,10 @@ class PPOAgentController(
                 env_action_responses[env_id] = EnvActionResponse.STEP()
         return env_action_responses
 
-    def process_env_actions(self, env_actions):
+    @override
+    def process_env_actions(
+        self, env_actions: dict[str, EnvActionResponse[AgentID, StateType]]
+    ):
         for env_id, env_action in env_actions.items():
             # this is a getter so we only want to do it once
             enum_type = env_action.enum_type
@@ -623,13 +722,13 @@ class PPOAgentController(
         """
         Function to update the value predictions inside the Trajectory instances of self.iteration_trajectories
         """
-        traj_timestep_idx_ranges: List[Tuple[int, int]] = []
+        traj_timestep_idx_ranges: list[tuple[int, int]] = []
         start = 0
         stop = 0
-        critic_agent_id_input: List[AgentID] = []
-        critic_obs_input: List[ObsType] = []
+        critic_agent_id_input: list[AgentID] = []
+        critic_obs_input: list[ObsType] = []
         for trajectory in self.iteration_trajectories:
-            obs_list = trajectory.obs_list + [trajectory.final_obs]
+            obs_list = trajectory.obs_list + [cast(ObsType, trajectory.final_obs)]
             traj_len = len(obs_list)
             agent_id_list = [trajectory.agent_id] * traj_len
             stop = start + traj_len

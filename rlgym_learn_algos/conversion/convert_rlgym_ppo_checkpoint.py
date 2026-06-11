@@ -1,11 +1,9 @@
-import json
 import os
 import time
-from typing import Optional
 
 
 def convert_rlgym_ppo_checkpoint(
-    rlgym_ppo_checkpoint_folder: str, out_folder: Optional[str]
+    rlgym_ppo_checkpoint_folder: str, out_folder: str | None
 ):
 
     if out_folder is None:
@@ -24,4 +22,4 @@ def convert_rlgym_ppo_checkpoint(
     for file in PPO_FILES:
         with open(f"{rlgym_ppo_checkpoint_folder}/{file[0]}", "rb") as fin:
             with open(f"{out_folder}/ppo_learner/{file[1]}", "wb") as fout:
-                fout.write(fin.read())
+                _ = fout.write(fin.read())

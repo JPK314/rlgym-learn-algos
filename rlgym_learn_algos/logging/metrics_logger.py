@@ -1,7 +1,8 @@
-from abc import abstractmethod
+# pyright: reportUnusedParameter=false
+
 from dataclasses import dataclass
 from os import PathLike
-from typing import Any, Dict, Generic, List, Optional, Type, TypeVar
+from typing import Any, Generic, TypeVar
 
 from pydantic import BaseModel, InstanceOf
 from rlgym_learn.api import (
@@ -10,14 +11,14 @@ from rlgym_learn.api import (
     DerivedAgentControllerConfig,
 )
 
-MetricsLoggerConfig = TypeVar("MetricsLoggerConfig", bound=InstanceOf[BaseModel])
+MetricsLoggerConfig = TypeVar("MetricsLoggerConfig", bound=InstanceOf[BaseModel] | None)
 
 
 @dataclass
 class DerivedMetricsLoggerConfig(Generic[AgentControllerConfig, MetricsLoggerConfig]):
     derived_agent_controller_config: DerivedAgentControllerConfig[AgentControllerConfig]
-    metrics_logger_config: Optional[MetricsLoggerConfig] = None
-    checkpoint_load_folder: Optional[str] = None
+    metrics_logger_config: MetricsLoggerConfig
+    checkpoint_load_folder: str | None = None
 
 
 # TODO: update docs
@@ -41,16 +42,16 @@ class MetricsLogger(
     """
 
     @property
-    def config_model(self) -> Type[Optional[MetricsLoggerConfig]]:
+    def config_model(self) -> type[MetricsLoggerConfig] | None:
         """
-        Function to return the config model type that your MetricsLogger implementation uses. Defaults to NoneType.
+        Function to return the config model type that your MetricsLogger implementation uses. Defaults to None.
         """
-        return type(None)
+        return None
 
-    def collect_env_metrics(self, data: List[Dict[str, Any]]):
+    def collect_env_metrics(self, data: list[dict[str, Any] | None]):
         """
         This method is intended to allow batch processing of env metrics using the shared info deserialized from the env processes. The result of processing should be stored and used the next time report_metrics is called.
-        There is no guarantee that this method will only be called once between each report_metrics call.
+        There is no guarantee that this method will only be called once between each report_metrics call. The list will only contain Nones if shared_info_serde_type is set to None in SerdeTypesModel.
         """
         pass
 
@@ -61,8 +62,7 @@ class MetricsLogger(
         """
         pass
 
-    @abstractmethod
-    def report_metrics(self):
+    def report_metrics(self) -> None:
         """
         This method is intended to have arbitrary side effects based on data collected so far. This could be printing, or logging to wandb, or sending data to a redis server, or whatever.
         """

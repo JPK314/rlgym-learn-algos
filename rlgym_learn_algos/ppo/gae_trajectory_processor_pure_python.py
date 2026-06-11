@@ -1,10 +1,11 @@
 import json
 import os
-from typing import List
+from typing import cast
 
 import numpy as np
 import torch
 from rlgym.api import ActionType, AgentID, ObsType, RewardType
+from typing_extensions import override
 
 from rlgym_learn_algos.stateful_functions import (
     BatchRewardTypeNumpyConverter,
@@ -16,7 +17,12 @@ from .gae_trajectory_processor import (
     GAETrajectoryProcessorConfigModel,
     GAETrajectoryProcessorData,
 )
-from .trajectory_processor import TRAJECTORY_PROCESSOR_FILE, TrajectoryProcessor
+from .trajectory import Trajectory
+from .trajectory_processor import (
+    TRAJECTORY_PROCESSOR_FILE,
+    DerivedTrajectoryProcessorConfig,
+    TrajectoryProcessor,
+)
 
 
 class GAETrajectoryProcessorPurePython(
@@ -31,42 +37,72 @@ class GAETrajectoryProcessorPurePython(
 ):
     def __init__(
         self,
-        batch_reward_type_numpy_converter: BatchRewardTypeNumpyConverter[
-            RewardType
-        ] = BatchRewardTypeSimpleNumpyConverter(),
+        batch_reward_type_numpy_converter: BatchRewardTypeNumpyConverter[RewardType]
+        | None = None,
     ):
         """
-        :param gamma: Gamma hyper-parameter.
-        :param lmbda: Lambda hyper-parameter.
-        :param return_std: Standard deviation of the returns (used for reward normalization).
+        :param batch_reward_type_numpy_converter: Instance of BatchRewardTypeNumpyConverter to use.
         """
-        self.return_stats = WelfordRunningStat(1)
-        self.batch_reward_type_numpy_converter = batch_reward_type_numpy_converter
+        self.return_stats: WelfordRunningStat = WelfordRunningStat((1,))
+        self.config: (
+            DerivedTrajectoryProcessorConfig[GAETrajectoryProcessorConfigModel] | None
+        ) = None
+        self.return_stats = WelfordRunningStat((1,))
+        self.batch_reward_type_numpy_converter: BatchRewardTypeNumpyConverter[
+            RewardType
+        ] = (
+            batch_reward_type_numpy_converter
+            if batch_reward_type_numpy_converter is not None
+            else BatchRewardTypeSimpleNumpyConverter()
+        )
+        self.gamma: float
+        self.lmbda: float
+        self.standardize_returns: bool
+        self.max_returns_per_stats_increment: int
+        self.dtype: np.dtype
+        self.device: torch.device
+        self.checkpoint_load_folder: str | None
+        self.norm_reward_min: np.ndarray
+        self.norm_reward_max: np.ndarray
 
     @property
+    @override
     def config_model(self):
         return GAETrajectoryProcessorConfigModel
 
-    def process_trajectories(self, trajectories):
+    @override
+    def process_trajectories(
+        self, trajectories: list[Trajectory[AgentID, ObsType, ActionType, RewardType]]
+    ) -> tuple[
+        tuple[
+            list[AgentID],
+            list[ObsType],
+            list[ActionType],
+            torch.Tensor,
+            torch.Tensor,
+            torch.Tensor,
+        ],
+        GAETrajectoryProcessorData,
+    ]:
         return_std = (
             self.return_stats.std.squeeze() if self.standardize_returns else None
         )
         gamma = np.array(self.gamma, dtype=self.dtype)
         lmbda = np.array(self.lmbda, dtype=self.dtype)
         exp_len = 0
-        agent_ids: List[AgentID] = []
-        observations: List[ObsType] = []
-        actions: List[ActionType] = []
+        agent_ids: list[AgentID] = []
+        observations: list[ObsType] = []
+        actions: list[ActionType] = []
         # For some reason, appending to lists is faster than preallocating the tensor and then indexing into it to assign
-        log_probs_list: List[torch.Tensor] = []
-        values_list: List[torch.Tensor] = []
-        advantages_list: List[torch.Tensor] = []
-        returns_list: List[torch.Tensor] = []
+        log_probs_list: list[torch.Tensor] = []
+        values_list: list[torch.Tensor] = []
+        advantages_list: list[np.ndarray] = []
+        returns_list: list[np.ndarray] = []
         reward_sum = np.array(0, dtype=self.dtype)
         for trajectory in trajectories:
             cur_return = np.array(0, dtype=self.dtype)
             next_val_pred = (
-                trajectory.final_val_pred.squeeze().cpu().numpy()
+                cast(torch.Tensor, trajectory.final_val_pred).squeeze().cpu().numpy()
                 if trajectory.truncated
                 else np.array(0, dtype=self.dtype)
             )
@@ -75,7 +111,7 @@ class GAETrajectoryProcessorPurePython(
             reward_array = self.batch_reward_type_numpy_converter.as_numpy(
                 trajectory.reward_list
             )
-            value_preds = trajectory.val_preds.unbind(0)
+            value_preds = cast(torch.Tensor, trajectory.val_preds).unbind(0)
             for obs, action, log_prob, reward, value_pred in reversed(
                 list(
                     zip(
@@ -94,6 +130,7 @@ class GAETrajectoryProcessorPurePython(
                         reward / return_std,
                         a_min=self.norm_reward_min,
                         a_max=self.norm_reward_max,
+                        dtype=self.dtype,
                     )
                 else:
                     norm_reward = reward
@@ -116,8 +153,8 @@ class GAETrajectoryProcessorPurePython(
 
             for sample in returns_list[:n_to_increment]:
                 self.return_stats.update(sample)
-            avg_return = self.return_stats.mean
-            return_std = self.return_stats.std
+            avg_return = self.return_stats.mean[0]
+            return_std = self.return_stats.std[0]
         else:
             avg_return = np.nan
             return_std = np.nan
@@ -136,12 +173,16 @@ class GAETrajectoryProcessorPurePython(
                 actions,
                 torch.stack(log_probs_list).to(device=self.device),
                 torch.stack(values_list).to(device=self.device),
-                torch.from_numpy(np.array(advantages_list)).to(device=self.device),
+                torch.from_numpy(np.array(advantages_list)).to(device=self.device),  # pyright: ignore [reportUnknownMemberType]
             ),
             trajectory_processor_data,
         )
 
-    def load(self, config):
+    @override
+    def load(
+        self,
+        config: DerivedTrajectoryProcessorConfig[GAETrajectoryProcessorConfigModel],
+    ):
         self.gamma = config.trajectory_processor_config.gamma
         self.lmbda = config.trajectory_processor_config.lmbda
         self.standardize_returns = (
@@ -160,6 +201,9 @@ class GAETrajectoryProcessorPurePython(
         self.batch_reward_type_numpy_converter.set_dtype(self.dtype)
 
     def _load_from_checkpoint(self):
+        assert self.checkpoint_load_folder is not None, (
+            "Cannot load from checkpoint if checkpoint load folder is None!"
+        )
         with open(
             os.path.join(self.checkpoint_load_folder, TRAJECTORY_PROCESSOR_FILE),
             "rt",
@@ -167,7 +211,8 @@ class GAETrajectoryProcessorPurePython(
             state = json.load(f)
         self.return_stats.load_state_dict(state["return_running_stats"])
 
-    def save_checkpoint(self, folder_path):
+    @override
+    def save_checkpoint(self, folder_path: str | os.PathLike[str]):
         state = {
             "return_running_stats": self.return_stats.state_dict(),
         }

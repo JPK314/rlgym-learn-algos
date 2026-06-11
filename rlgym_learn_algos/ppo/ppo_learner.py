@@ -3,11 +3,11 @@ import os
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Generic, Optional
+from typing import Generic, cast
 
 import numpy as np
 import torch
-from pydantic import BaseModel, field_serializer, model_validator
+from pydantic import BaseModel, model_validator
 from rlgym.api import (
     ActionSpaceType,
     ActionType,
@@ -50,12 +50,12 @@ class PPOLearnerConfigModel(BaseModel, extra="forbid"):
 
 
 @dataclass
-class DerivedPPOLearnerConfig:
+class DerivedPPOLearnerConfig(Generic[ObsSpaceType, ActionSpaceType]):
     learner_config: PPOLearnerConfigModel
     agent_controller_name: str
     obs_space: ObsSpaceType
     action_space: ActionSpaceType
-    checkpoint_load_folder: Optional[str] = None
+    checkpoint_load_folder: str | None = None
 
 
 @dataclass
@@ -99,10 +99,23 @@ class PPOLearner(
             [ObsSpaceType, torch.device], Critic[AgentID, ObsType]
         ],
     ):
-        self.actor_factory = actor_factory
-        self.critic_factory = critic_factory
+        self.actor_factory: Callable[
+            [ObsSpaceType, ActionSpaceType, torch.device],
+            Actor[AgentID, ObsType, ActionType],
+        ] = actor_factory
+        self.critic_factory: Callable[
+            [ObsSpaceType, torch.device], Critic[AgentID, ObsType]
+        ] = critic_factory
+        self.critic_loss_fn: nn.Module = torch.nn.MSELoss()
+        self.config: DerivedPPOLearnerConfig[ObsSpaceType, ActionSpaceType]
+        self.actor: Actor[AgentID, ObsType, ActionType]
+        self.critic: Critic[AgentID, ObsType]
+        self.actor_optimizer: torch.optim.Optimizer
+        self.critic_optimizer: torch.optim.Optimizer
+        self.cumulative_model_updates: int
+        self.minibatch_size: int
 
-    def load(self, config: DerivedPPOLearnerConfig):
+    def load(self, config: DerivedPPOLearnerConfig[ObsSpaceType, ActionSpaceType]):
         self.config = config
 
         if (
@@ -124,7 +137,6 @@ class PPOLearner(
         self.critic_optimizer = torch.optim.Adam(
             self.critic.parameters(), lr=self.config.learner_config.critic_lr
         )
-        self.critic_loss_fn = torch.nn.MSELoss()
 
         # Calculate parameter counts
         actor_params = self.actor.parameters()
@@ -179,18 +191,21 @@ class PPOLearner(
         )
 
     def _load_from_checkpoint(self):
+        assert self.config.checkpoint_load_folder is not None, (
+            "Cannot load from checkpoint if checkpoint load folder is None!"
+        )
 
         assert os.path.exists(self.config.checkpoint_load_folder), (
             f"{self.config.agent_controller_name}: PPO Learner cannot find folder: {self.config.checkpoint_load_folder}"
         )
 
-        self.actor.load_state_dict(
+        _ = self.actor.load_state_dict(
             torch.load(
                 os.path.join(self.config.checkpoint_load_folder, ACTOR_FILE),
                 map_location=self.config.learner_config.device,
             )
         )
-        self.critic.load_state_dict(
+        _ = self.critic.load_state_dict(
             torch.load(
                 os.path.join(self.config.checkpoint_load_folder, CRITIC_FILE),
                 map_location=self.config.learner_config.device,
@@ -220,7 +235,7 @@ class PPOLearner(
             )
             self.cumulative_model_updates = 0
 
-    def save_checkpoint(self, folder_path):
+    def save_checkpoint(self, folder_path: str | os.PathLike[str]) -> None:
         os.makedirs(folder_path, exist_ok=True)
         torch.save(self.actor.state_dict(), os.path.join(folder_path, ACTOR_FILE))
         torch.save(self.critic.state_dict(), os.path.join(folder_path, CRITIC_FILE))
@@ -257,17 +272,17 @@ class PPOLearner(
         """
 
         n_batches = 0
-        clip_fractions = []
-        entropies = []
-        divergences = []
-        val_losses = []
+        clip_fractions: list[tuple[torch.Tensor, float]] = []
+        entropies: list[torch.Tensor] = []
+        divergences: list[torch.Tensor] = []
+        val_losses: list[torch.Tensor] = []
 
         # Save parameters before computing any updates.
         actor_before = torch.nn.utils.parameters_to_vector(self.actor.parameters())
         critic_before = torch.nn.utils.parameters_to_vector(self.critic.parameters())
 
         t1 = time.time()
-        for epoch in range(self.config.learner_config.n_epochs):
+        for _epoch in range(self.config.learner_config.n_epochs):
             # Get all shuffled batches from the experience buffer.
             batches = exp.get_all_batches_shuffled(
                 self.config.learner_config.batch_size
@@ -357,15 +372,15 @@ class PPOLearner(
                         -torch.min(ratio * advantages, clipped * advantages).mean()
                         * minibatch_ratio
                     )
-                    value_loss = (
+                    value_loss: torch.Tensor = (
                         self.critic_loss_fn(vals, target_values) * minibatch_ratio
                     )
                     ppo_loss = (
                         actor_loss - entropy * self.config.learner_config.ent_coef
                     )
 
-                    ppo_loss.backward()
-                    value_loss.backward()
+                    ppo_loss.backward()  # pyright: ignore [reportUnknownMemberType, reportUnusedCallResult]
+                    value_loss.backward()  # pyright: ignore [reportUnknownMemberType, reportUnusedCallResult]
 
                     val_losses.append(
                         value_loss.to(device="cpu", non_blocking=True).detach()
@@ -375,8 +390,12 @@ class PPOLearner(
                         entropy.to(device="cpu", non_blocking=True).detach()
                     )
 
-                torch.nn.utils.clip_grad_norm_(self.critic.parameters(), max_norm=0.5)
-                torch.nn.utils.clip_grad_norm_(self.actor.parameters(), max_norm=0.5)
+                _ = torch.nn.utils.clip_grad_norm_(
+                    self.critic.parameters(), max_norm=0.5
+                )
+                _ = torch.nn.utils.clip_grad_norm_(
+                    self.actor.parameters(), max_norm=0.5
+                )
 
                 self.actor_optimizer.step()
                 self.critic_optimizer.step()
@@ -386,8 +405,14 @@ class PPOLearner(
         # Compute magnitude of updates made to the actor and critic.
         actor_after = torch.nn.utils.parameters_to_vector(self.actor.parameters())
         critic_after = torch.nn.utils.parameters_to_vector(self.critic.parameters())
-        actor_update_magnitude = (actor_before - actor_after).norm().cpu().item()
-        critic_update_magnitude = (critic_before - critic_after).norm().cpu().item()
+        actor_update_magnitude = cast(
+            float,
+            (actor_before - actor_after).norm().cpu().item(),  # pyright: ignore [reportUnknownMemberType]
+        )
+        critic_update_magnitude = cast(
+            float,
+            (critic_before - critic_after).norm().cpu().item(),  # pyright: ignore [reportUnknownMemberType]
+        )
 
         if self.config.learner_config.device.type != "cpu":
             torch.cuda.current_stream().synchronize()

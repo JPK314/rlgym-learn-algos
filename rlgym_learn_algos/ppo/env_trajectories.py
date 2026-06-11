@@ -1,4 +1,4 @@
-from typing import Callable, Dict, Generic, List, Optional
+from typing import Callable, Generic
 
 import torch
 from rlgym.api import ActionType, AgentID, ObsType, RewardType
@@ -11,20 +11,20 @@ from .trajectory import Trajectory
 class EnvTrajectories(Generic[AgentID, ObsType, ActionType, RewardType]):
     def __init__(
         self,
-        agent_ids: List[AgentID],
-        agent_choice_fn: Callable[[List[AgentID]], List[int]] = lambda agent_id_list: (
+        agent_ids: list[AgentID],
+        agent_choice_fn: Callable[[list[AgentID]], list[int]] = lambda agent_id_list: (
             list(range(len(agent_id_list)))
         ),
     ) -> None:
-        self.used_agent_id_idx_map = {
+        self.used_agent_id_idx_map: dict[AgentID, int] = {
             agent_ids[idx]: idx for idx in agent_choice_fn(agent_ids)
         }
-        self.obs_lists: Dict[AgentID, List[ObsType]] = {}
-        self.action_lists: Dict[AgentID, List[ActionType]] = {}
-        self.reward_lists: Dict[AgentID, List[RewardType]] = {}
-        self.final_obs: Dict[AgentID, Optional[ObsType]] = {}
-        self.dones: Dict[AgentID, bool] = {}
-        self.truncateds: Dict[AgentID, bool] = {}
+        self.obs_lists: dict[AgentID, list[ObsType]] = {}
+        self.action_lists: dict[AgentID, list[ActionType]] = {}
+        self.reward_lists: dict[AgentID, list[RewardType]] = {}
+        self.final_obs: dict[AgentID, ObsType | None] = {}
+        self.dones: dict[AgentID, bool] = {}
+        self.truncateds: dict[AgentID, bool] = {}
         for agent_id in self.used_agent_id_idx_map:
             self.obs_lists[agent_id] = []
             self.action_lists[agent_id] = []
@@ -32,9 +32,13 @@ class EnvTrajectories(Generic[AgentID, ObsType, ActionType, RewardType]):
             self.final_obs[agent_id] = None
             self.dones[agent_id] = False
             self.truncateds[agent_id] = False
-        self.log_probs_list = []
+        self.log_probs_list: list[Tensor] = []
 
-    def add_steps(self, timesteps: List[Timestep], log_probs: Tensor):
+    def add_steps(
+        self,
+        timesteps: list[Timestep[AgentID, ObsType, ActionType, RewardType]],
+        log_probs: Tensor,
+    ):
         steps_added = 0
         for timestep in timesteps:
             agent_id = timestep.agent_id
@@ -67,12 +71,12 @@ class EnvTrajectories(Generic[AgentID, ObsType, ActionType, RewardType]):
 
     def get_trajectories(
         self,
-    ) -> List[Trajectory[AgentID, ObsType, ActionType, RewardType]]:
+    ) -> list[Trajectory[AgentID, ObsType, ActionType, RewardType]]:
         """
         :return: List of trajectories relevant to this env
         """
         log_probs = torch.stack(self.log_probs_list)
-        trajectories = []
+        trajectories: list[Trajectory[AgentID, ObsType, ActionType, RewardType]] = []
         for agent_id, idx in self.used_agent_id_idx_map.items():
             obs_list = self.obs_lists[agent_id]
             trajectories.append(

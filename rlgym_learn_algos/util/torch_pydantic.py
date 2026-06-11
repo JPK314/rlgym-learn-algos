@@ -1,13 +1,7 @@
 from typing import Annotated, Any
 
 import torch
-from pydantic import (
-    BaseModel,
-    GetCoreSchemaHandler,
-    GetJsonSchemaHandler,
-    ValidationError,
-)
-from pydantic.json_schema import JsonSchemaValue
+from pydantic import GetCoreSchemaHandler
 from pydantic_core import core_schema
 
 dtype_str_regex = "|".join(
@@ -42,7 +36,7 @@ device_str_regex = (
             "privateuseone",
         ]
     )
-    + ")(:\d+)?"
+    + r")(:\d+)?"
 )
 
 

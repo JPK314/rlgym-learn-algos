@@ -12,13 +12,15 @@ Description:
 """
 
 import functools
-from typing import Iterable, List, Tuple
+from collections.abc import Iterable, Sequence
+from typing import Any
 
 import numpy as np
 import torch
 import torch.nn as nn
 from rlgym.api import AgentID
 from torch.distributions import Normal
+from typing_extensions import override
 
 from rlgym_learn_algos.util import torch_functions
 
@@ -27,11 +29,17 @@ from .actor import Actor
 
 class ContinuousActor(Actor[AgentID, np.ndarray, np.ndarray]):
     def __init__(
-        self, input_shape, output_shape, layer_sizes, device, var_min=0.1, var_max=1.0
+        self,
+        input_shape: int,
+        output_shape: int,
+        layer_sizes: tuple[int],
+        device: torch.Device,
+        var_min: float = 0.1,
+        var_max: float = 1.0,
     ):
         super().__init__()
-        self.device = device
-        self.affine_map = torch_functions.MapContinuousToAction(
+        self.device: torch.Device = device
+        self.affine_map: nn.Module = torch_functions.MapContinuousToAction(
             range_min=var_min, range_max=var_max
         )
 
@@ -39,7 +47,7 @@ class ContinuousActor(Actor[AgentID, np.ndarray, np.ndarray]):
         assert len(layer_sizes) != 0, (
             "AT LEAST ONE LAYER MUST BE SPECIFIED TO BUILD THE NEURAL NETWORK!"
         )
-        layers = [nn.Linear(input_shape, layer_sizes[0]), nn.ReLU()]
+        layers: list[nn.Module] = [nn.Linear(input_shape, layer_sizes[0]), nn.ReLU()]
 
         prev_size = layer_sizes[0]
         for size in layer_sizes[1:]:
@@ -49,10 +57,10 @@ class ContinuousActor(Actor[AgentID, np.ndarray, np.ndarray]):
 
         layers.append(nn.Linear(layer_sizes[-1], output_shape))
         layers.append(nn.Tanh())
-        self.model = nn.Sequential(*layers).to(self.device)
+        self.model: nn.Module = nn.Sequential(*layers).to(self.device)
 
     @functools.lru_cache()
-    def logpdf(self, x, mean, std):
+    def logpdf(self, x: torch.Tensor, mean: torch.Tensor, std: torch.Tensor):
         """
         Function to compute the log of the pdf of our distribution parameterized by (mean, std) evaluated at x. PyTorch
         can do this natively but I don't trust their method.
@@ -74,8 +82,8 @@ class ContinuousActor(Actor[AgentID, np.ndarray, np.ndarray]):
         return term1 + term2 + term3 + term4
 
     def get_output(
-        self, obs_list: List[np.ndarray]
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        self, obs_list: Sequence[np.ndarray]
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         obs = torch.as_tensor(
             np.array(obs_list), dtype=torch.float32, device=self.device
         )
@@ -83,9 +91,13 @@ class ContinuousActor(Actor[AgentID, np.ndarray, np.ndarray]):
         policy_output = self.model(obs)
         return self.affine_map(policy_output)
 
+    @override
     def get_action(
-        self, agent_id_list, obs_list, **kwargs
-    ) -> Tuple[Iterable[np.ndarray], torch.Tensor]:
+        self,
+        agent_id_list: Sequence[AgentID],
+        obs_list: Sequence[np.ndarray],
+        **kwargs: dict[str, Any],
+    ) -> tuple[Iterable[np.ndarray], torch.Tensor]:
         mean, std = self.get_output(obs_list)
         if "deterministic" in kwargs and kwargs["deterministic"]:
             # The probability of a deterministic action occurring is 1 -> log(1) = 0.
@@ -104,7 +116,14 @@ class ContinuousActor(Actor[AgentID, np.ndarray, np.ndarray]):
 
         return action.cpu().numpy(), log_prob.cpu().squeeze()
 
-    def get_backprop_data(self, agent_id_list, obs_list, acts, **kwargs):
+    @override
+    def get_backprop_data(
+        self,
+        agent_id_list: Sequence[AgentID],
+        obs_list: Sequence[np.ndarray],
+        acts: Sequence[np.ndarray],
+        **kwargs: dict[str, Any],
+    ):
         mean, std = self.get_output(obs_list)
         distribution = Normal(loc=mean, scale=std)
 

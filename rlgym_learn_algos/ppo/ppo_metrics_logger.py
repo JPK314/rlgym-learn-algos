@@ -14,13 +14,13 @@ class PPOMetricsLogger(
     ],
 ):
     def __init__(self):
-        self.state_metrics: Dict[str, Any] = {}
-        self.agent_metrics: Dict[str, Any] = {}
+        self.state_metrics: dict[str, Any] = {}
+        self.agent_metrics: dict[str, Any] = {}
 
-    def get_metrics(self) -> Dict[str, Any]:
+    def get_metrics(self) -> dict[str, Any]:
         return {**self.agent_metrics, **self.state_metrics}
 
-    def collect_env_metrics(self, data: List[Dict[str, Any]]):
+    def collect_env_metrics(self, data: list[dict[str, Any]]):
         """
         Override this function to set self.state_metrics to something else using the data provided.
         The metrics should be nested dictionaries

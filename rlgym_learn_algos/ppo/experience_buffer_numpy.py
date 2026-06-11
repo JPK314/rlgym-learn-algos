@@ -1,13 +1,17 @@
-from typing import List, Optional
-
 import numpy as np
 import torch
 from rlgym.api import AgentID, RewardType
+from typing_extensions import override
 
 from .experience_buffer import ExperienceBuffer
-from .trajectory_processor import TrajectoryProcessorConfig, TrajectoryProcessorData
+from .trajectory_processor import (
+    TrajectoryProcessor,
+    TrajectoryProcessorConfig,
+    TrajectoryProcessorData,
+)
 
 
+# Ignore this for now, experience buffers will get refactored to use tensordicts and then this won't be needed
 class NumpyExperienceBuffer(
     ExperienceBuffer[
         TrajectoryProcessorConfig,
@@ -19,7 +23,7 @@ class NumpyExperienceBuffer(
     ],
 ):
     @staticmethod
-    def _cat_numpy(t1, t2, size):
+    def _cat_numpy(t1: np.ndarray | None, t2: np.ndarray, size: int):
         t2 = np.array(t2)
         t2_len = len(t2)
         if t1 is None:
@@ -54,16 +58,31 @@ class NumpyExperienceBuffer(
 
     def __init__(
         self,
-        trajectory_processor,
+        trajectory_processor: TrajectoryProcessor[
+            TrajectoryProcessorConfig,
+            AgentID,
+            np.ndarray,
+            np.ndarray,
+            RewardType,
+            TrajectoryProcessorData,
+        ],
     ):
-        self.trajectory_processor = trajectory_processor
-        self.agent_ids: List[AgentID] = []
-        self.observations: Optional[np.ndarray] = None
-        self.actions: Optional[np.ndarray] = None
-        self.log_probs = torch.FloatTensor()
-        self.values = torch.FloatTensor()
-        self.advantages = torch.FloatTensor()
+        self.trajectory_processor: TrajectoryProcessor[
+            TrajectoryProcessorConfig,
+            AgentID,
+            np.ndarray,
+            np.ndarray,
+            RewardType,
+            TrajectoryProcessorData,
+        ] = trajectory_processor
+        self.agent_ids: list[AgentID] = []
+        self.observations: np.ndarray | None = None
+        self.actions: np.ndarray | None = None
+        self.log_probs: torch.Tensor = torch.FloatTensor()
+        self.values: torch.Tensor = torch.FloatTensor()
+        self.advantages: torch.Tensor = torch.FloatTensor()
 
+    @override
     def submit_experience(self, trajectories):
         _cat = ExperienceBuffer._cat
         _cat_list = ExperienceBuffer._cat_list
@@ -114,6 +133,7 @@ class NumpyExperienceBuffer(
             self.advantages[indices],
         )
 
+    @override
     def get_all_batches_shuffled(self, batch_size):
         """
         Function to return the experience buffer in shuffled batches. Code taken from the stable-baeselines3 buffer:

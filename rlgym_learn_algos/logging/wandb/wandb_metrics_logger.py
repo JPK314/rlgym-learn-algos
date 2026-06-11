@@ -2,7 +2,8 @@ import json
 import os
 import time
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, Generic, List, Optional, Type, TypeVar
+from os import PathLike
+from typing import Any, Callable, Generic, TypeVar, cast
 
 import wandb
 from pydantic import BaseModel, Field, InstanceOf, ValidationInfo, model_validator
@@ -11,6 +12,7 @@ from rlgym_learn.api import (
     AgentControllerData,
     DerivedAgentControllerConfig,
 )
+from typing_extensions import override
 
 from ..dict_metrics_logger import DictMetricsLogger
 from ..metrics_logger import (
@@ -18,21 +20,23 @@ from ..metrics_logger import (
     MetricsLogger,
 )
 
-# wandb can create a /wandb folder on sys.path that python thinks is module it can import.
+# wandb can create a /wandb folder on sys.path that python thinks is a module it can import.
 # If wandb gets uninstalled but this folder stays then python will resolve this folder as a module it can import, which causes confusion
-if wandb.__file__ is None:
+if wandb.__file__ is None:  # pyright: ignore [reportUnnecessaryComparison]
     raise ModuleNotFoundError("No module named 'wandb'", name="wandb")
 
 InnerMetricsLoggerConfig = TypeVar(
-    "InnerMetricsLoggerConfig", bound=InstanceOf[BaseModel]
+    "InnerMetricsLoggerConfig", bound=InstanceOf[BaseModel] | None
 )
 
 
-def convert_nested_dict(d):
-    new = {}
+def convert_nested_dict(d: dict[str, Any]):
+    new: dict[str, Any] = {}
     for k, v in d.items():
         if isinstance(v, dict):
-            converted = convert_nested_dict(v)
+            converted = convert_nested_dict(
+                {str(k1): v1 for (k1, v1) in cast(dict[Any, Any], v).items()}
+            )
             to_add = {f"{k}/{k1}": v1 for k1, v1 in converted.items()}
         else:
             to_add = {k: v}
@@ -43,34 +47,37 @@ def convert_nested_dict(d):
 class WandbMetricsLoggerConfigModel(
     BaseModel, Generic[InnerMetricsLoggerConfig], extra="forbid"
 ):
+    inner_metrics_logger_config: InnerMetricsLoggerConfig
     enable: bool = True
     project: str = "rlgym-learn"
     group: str = "unnamed-runs"
     run: str = "rlgym-learn-run"
-    id: Optional[str] = None
+    id: str | None = None
     new_run_with_run_suffix: bool = False
-    additional_wandb_run_config: Dict[str, Any] = Field(default_factory=dict)
-    settings_kwargs: Dict[str, Any] = Field(default_factory=dict)
-    inner_metrics_logger_config: Optional[InnerMetricsLoggerConfig] = None
+    additional_wandb_run_config: dict[str, Any] = Field(default_factory=dict)
+    settings_kwargs: dict[str, Any] = Field(default_factory=dict)
 
     @model_validator(mode="before")
     @classmethod
     def validate_metrics_logger_config_model(
         cls, data: Any, info: ValidationInfo
     ) -> Any:
-        wandb_metrics_logger: Optional[WandbMetricsLogger] = info.context
-
+        wandb_metrics_logger: (
+            WandbMetricsLogger[Any, Any, InstanceOf[BaseModel]] | None
+        ) = info.context
+        data_dict = data
         if (
             wandb_metrics_logger is not None
-            and isinstance(data, dict)
-            and "inner_metrics_logger_config" in data
+            and isinstance(data_dict, dict)
+            and "inner_metrics_logger_config" in data_dict
         ):
-            inner_metrics_logger_config_raw = data["inner_metrics_logger_config"]
+            data_dict = cast(dict[Any, Any], data_dict)
+            inner_metrics_logger_config_raw = data_dict["inner_metrics_logger_config"]
             if isinstance(inner_metrics_logger_config_raw, dict):
-                inner_metrics_logger_config_model_type: Type[Optional[BaseModel]] = (
+                inner_metrics_logger_config_model_type: type[BaseModel] | None = (
                     wandb_metrics_logger.inner_metrics_logger.config_model
                 )
-                if inner_metrics_logger_config_model_type is type(None):
+                if inner_metrics_logger_config_model_type is None:
                     inner_metrics_logger_config = None
                 else:
                     inner_metrics_logger_config = (
@@ -81,14 +88,14 @@ class WandbMetricsLoggerConfigModel(
                     )
             else:
                 inner_metrics_logger_config = inner_metrics_logger_config_raw
-            data["inner_metrics_logger_config"] = inner_metrics_logger_config
+            data_dict["inner_metrics_logger_config"] = inner_metrics_logger_config
         return data
 
 
 @dataclass
 class WandbAdditionalDerivedConfig:
-    derived_wandb_run_config: Dict[str, Any] = Field(default_factory=dict)
-    run_suffix: Optional[str] = None
+    derived_wandb_run_config: dict[str, Any] = Field(default_factory=dict)
+    run_suffix: str | None = None
 
 
 class WandbMetricsLogger(
@@ -106,37 +113,66 @@ class WandbMetricsLogger(
             InnerMetricsLoggerConfig,
             AgentControllerData,
         ],
-        additional_derived_config_factory: Optional[
+        additional_derived_config_factory: Callable[
+            [DerivedAgentControllerConfig[AgentControllerConfig]],
+            WandbAdditionalDerivedConfig,
+        ]
+        | None = None,
+        checkpoint_file_name: str = "wandb_metrics_logger.json",
+    ):
+        self.inner_metrics_logger: DictMetricsLogger[
+            AgentControllerConfig,
+            InnerMetricsLoggerConfig,
+            AgentControllerData,
+        ] = inner_metrics_logger
+        self.additional_derived_config_factory: (
             Callable[
                 [DerivedAgentControllerConfig[AgentControllerConfig]],
                 WandbAdditionalDerivedConfig,
             ]
-        ] = None,
-        checkpoint_file_name: str = "wandb_metrics_logger.json",
-    ):
-        self.inner_metrics_logger = inner_metrics_logger
-        self.additional_derived_config_factory = additional_derived_config_factory
-        self.checkpoint_file_name = checkpoint_file_name
-        self.run_id = None
+            | None
+        ) = additional_derived_config_factory
+        self.checkpoint_file_name: str = checkpoint_file_name
+        self.run_id: str | None = None
+        self.wandb_run: wandb.Run | None = None
+        self.config: (
+            DerivedMetricsLoggerConfig[
+                AgentControllerConfig,
+                WandbMetricsLoggerConfigModel[InnerMetricsLoggerConfig],
+            ]
+            | None
+        ) = None
+        self.additional_derived_config: WandbAdditionalDerivedConfig | None = None
 
     @property
+    @override
     def config_model(self):
         return WandbMetricsLoggerConfigModel
 
-    def collect_env_metrics(self, data: List[Dict[str, Any]]):
+    @override
+    def collect_env_metrics(self, data: list[dict[str, Any] | None]):
         self.inner_metrics_logger.collect_env_metrics(data)
 
+    @override
     def collect_agent_metrics(self, data: AgentControllerData):
         self.inner_metrics_logger.collect_agent_metrics(data)
 
+    @override
     def report_metrics(self):
-        self.wandb_run.log(convert_nested_dict(self.inner_metrics_logger.get_metrics()))
+        if self.wandb_run is not None:
+            self.wandb_run.log(
+                convert_nested_dict(self.inner_metrics_logger.get_metrics())
+            )
         self.inner_metrics_logger.report_metrics()
 
-    def validate_config(self, config_obj: Any):
-        return WandbMetricsLoggerConfigModel.model_validate(config_obj)
-
-    def load(self, config):
+    @override
+    def load(
+        self,
+        config: DerivedMetricsLoggerConfig[
+            AgentControllerConfig,
+            WandbMetricsLoggerConfigModel[InnerMetricsLoggerConfig],
+        ],
+    ):
         self.config = config
         self.additional_derived_config = (
             WandbAdditionalDerivedConfig()
@@ -199,6 +235,12 @@ class WandbMetricsLogger(
         )
 
     def _load_from_checkpoint(self):
+        assert self.config is not None, (
+            "Cannot load from checkpoint before calling load with config!"
+        )
+        assert self.config.checkpoint_load_folder is not None, (
+            "Cannot load from checkpoint if checkpoint load folder is None!"
+        )
         try:
             with open(
                 os.path.join(
@@ -218,7 +260,8 @@ class WandbMetricsLogger(
             )
             self.run_id = None
 
-    def save_checkpoint(self, folder_path):
+    @override
+    def save_checkpoint(self, folder_path: str | PathLike[str]):
         os.makedirs(folder_path, exist_ok=True)
         state = {"run_id": self.run_id}
         with open(

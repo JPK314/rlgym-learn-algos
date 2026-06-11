@@ -2,14 +2,15 @@ import numpy as np
 import torch
 import torch.nn as nn
 from rlgym.api import AgentID
+from typing_extensions import override
 
 from .critic import Critic
 
 
 class BasicCritic(Critic[AgentID, np.ndarray]):
-    def __init__(self, input_size, layer_sizes, device):
+    def __init__(self, input_size: int, layer_sizes: tuple[int], device: torch.Device):
         super().__init__()
-        self.device = device
+        self.device: torch.Device = device
 
         assert len(layer_sizes) != 0, (
             "AT LEAST ONE LAYER MUST BE SPECIFIED TO BUILD THE NEURAL NETWORK!"
@@ -23,9 +24,12 @@ class BasicCritic(Critic[AgentID, np.ndarray]):
             prev_size = size
 
         layers.append(nn.Linear(layer_sizes[-1], 1))
-        self.model = nn.Sequential(*layers).to(self.device)
+        self.model: nn.Module = nn.Sequential(*layers).to(self.device)
 
-    def forward(self, agent_id_list, obs_list) -> torch.Tensor:
+    @override
+    def forward(
+        self, agent_id_list: list[AgentID], obs_list: list[np.ndarray]
+    ) -> torch.Tensor:
         obs = torch.as_tensor(
             np.array(obs_list), dtype=torch.float32, device=self.device
         )

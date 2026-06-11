@@ -6,7 +6,17 @@ Description:
     An implementation of Welford's algorithm for running statistics.
 """
 
+from typing import TypedDict
+
 import numpy as np
+from numpy.typing import NDArray
+
+
+class WelfordRunningStatStateDict(TypedDict):
+    mean: list[float]
+    var: list[float]
+    shape: tuple[int, ...]
+    count: int
 
 
 class WelfordRunningStat(object):
@@ -14,26 +24,26 @@ class WelfordRunningStat(object):
     https://www.johndcook.com/blog/skewness_kurtosis/
     """
 
-    def __init__(self, shape):
-        self.ones = np.ones(shape=shape, dtype=np.float32)
-        self.zeros = np.zeros(shape=shape, dtype=np.float32)
+    def __init__(self, shape: tuple[int, ...]):
+        self.ones: NDArray[np.float32] = np.ones(shape=shape, dtype=np.float32)
+        self.zeros: NDArray[np.float32] = np.zeros(shape=shape, dtype=np.float32)
 
-        self.running_mean = np.zeros(shape=shape, dtype=np.float32)
-        self.running_variance = np.zeros(shape=shape, dtype=np.float32)
+        self.running_mean: NDArray[np.float32] = np.zeros(shape=shape, dtype=np.float32)
+        self.running_variance: NDArray[np.float32] = np.zeros(
+            shape=shape, dtype=np.float32
+        )
 
-        self.count = 0
-        self.shape = shape
+        self.count: int = 0
+        self.shape: tuple[int, ...] = shape
 
-    def increment(self, samples, num):
+    def increment(self, samples: np.ndarray, num: int):
         if num > 1:
             for i in range(num):
                 self.update(samples[i])
         else:
             self.update(samples)
 
-    def update(self, sample):
-        if type(sample) == dict:
-            sample = sample["frame"]
+    def update(self, sample: np.ndarray):
         current_count = self.count
         self.count += 1
         delta = (sample - self.running_mean).reshape(self.running_mean.shape)
@@ -55,7 +65,7 @@ class WelfordRunningStat(object):
         return self.running_mean
 
     @property
-    def std(self):
+    def std(self) -> NDArray[np.float32]:
         if self.count < 2:
             return self.ones
 
@@ -65,7 +75,7 @@ class WelfordRunningStat(object):
         var = np.where(var == 0, 1.0, var)
         return np.sqrt(var)
 
-    def increment_from_serialized_other(self, serialized_other):
+    def increment_from_serialized_other(self, serialized_other: np.ndarray):
         """
         Function to combine the statistics computed by two independent instances of this algorithm.
         :param serialized_other: A list containing the serialization of the other instance to be combined with.
@@ -111,7 +121,7 @@ class WelfordRunningStat(object):
             + [self.count]
         )
 
-    def deserialize(self, other):
+    def deserialize(self, other: np.ndarray):
         self.reset()
         n = np.prod(self.shape)
 
@@ -130,7 +140,7 @@ class WelfordRunningStat(object):
             "count": self.count,
         }
 
-    def load_state_dict(self, state):
+    def load_state_dict(self, state: WelfordRunningStatStateDict):
         shape = state["shape"]
         self.count = state["count"]
         self.running_mean = np.asarray(state["mean"]).reshape(shape)

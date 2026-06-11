@@ -19,11 +19,11 @@ class Trajectory(Generic[AgentID, ObsType, ActionType, RewardType]):
         "truncated",
     )
     agent_id: AgentID
-    obs_list: List[ObsType]
-    action_list: List[ActionType]
+    obs_list: list[ObsType]
+    action_list: list[ActionType]
     log_probs: Tensor
-    reward_list: List[RewardType]
-    val_preds: Tensor
-    final_obs: ObsType
-    final_val_pred: Tensor
+    reward_list: list[RewardType]
+    val_preds: Tensor | None
+    final_obs: ObsType | None
+    final_val_pred: Tensor | None
     truncated: bool

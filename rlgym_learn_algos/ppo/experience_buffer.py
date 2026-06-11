@@ -1,11 +1,13 @@
 import os
 import pickle
+from collections.abc import Generator, Sequence
 from dataclasses import dataclass
-from typing import Any, Generic, Iterable, List, Optional, Tuple, Type
+from typing import Any, Generic, cast
 
 import numpy as np
 import torch
-from pydantic import BaseModel, InstanceOf, ValidationInfo, model_validator
+from numpy.typing import NDArray
+from pydantic import BaseModel, ValidationInfo, model_validator
 from rlgym.api import ActionType, AgentID, ObsType, RewardType
 
 from rlgym_learn_algos.util.torch_pydantic import PydanticTorchDevice
@@ -28,48 +30,59 @@ class ExperienceBufferConfigModel(
     max_size: int = 100000
     device: PydanticTorchDevice = "cpu"  # pyright: ignore [reportAssignmentType]
     save_experience_buffer_in_checkpoint: bool = True
-    trajectory_processor_config: Optional[TrajectoryProcessorConfig] = None
+    trajectory_processor_config: TrajectoryProcessorConfig = None  # pyright: ignore [reportAssignmentType]
 
     @model_validator(mode="before")
     @classmethod
     def validate_trajectory_processor_config_model(
         cls, data: Any, info: ValidationInfo
-    ):
-        experience_buffer: Optional[ExperienceBuffer] = info.context
-
+    ) -> Any:
+        experience_buffer: (
+            ExperienceBuffer[
+                TrajectoryProcessorConfig,
+                Any,
+                Any,
+                Any,
+                Any,
+                Any,
+            ]
+            | None
+        ) = info.context
+        data_dict = data
         if (
             experience_buffer is not None
-            and isinstance(data, dict)
-            and "trajectory_processor_config" in data
+            and isinstance(data_dict, dict)
+            and "trajectory_processor_config" in data_dict
         ):
-            trajectory_processor_config_raw = data["trajectory_processor_config"]
+            data_dict = cast(dict[Any, Any], data_dict)
+            trajectory_processor_config_raw = data_dict["trajectory_processor_config"]
             if isinstance(trajectory_processor_config_raw, dict):
-                trajectory_processor_config_model_type: Type[Optional[BaseModel]] = (
+                trajectory_processor_config_model_type = (
                     experience_buffer.trajectory_processor.config_model
                 )
-                if trajectory_processor_config_model_type is type(None):
+                if trajectory_processor_config_model_type is None:
                     trajectory_processor_config = None
                 else:
-                    trajectory_processor_config = (
-                        trajectory_processor_config_model_type.model_validate(
-                            trajectory_processor_config_raw,
-                            context=experience_buffer.trajectory_processor,
-                        )
+                    trajectory_processor_config = cast(
+                        BaseModel, trajectory_processor_config_model_type
+                    ).model_validate(
+                        trajectory_processor_config_raw,
+                        context=experience_buffer.trajectory_processor,
                     )
             else:
                 trajectory_processor_config = trajectory_processor_config_raw
-            data["trajectory_processor_config"] = trajectory_processor_config
+            data_dict["trajectory_processor_config"] = trajectory_processor_config
         return data
 
 
 @dataclass
-class DerivedExperienceBufferConfig:
-    experience_buffer_config: ExperienceBufferConfigModel
+class DerivedExperienceBufferConfig(Generic[TrajectoryProcessorConfig]):
+    experience_buffer_config: ExperienceBufferConfigModel[TrajectoryProcessorConfig]
     agent_controller_name: str
     seed: int
     dtype: torch.dtype
     learner_device: torch.device
-    checkpoint_load_folder: Optional[str] = None
+    checkpoint_load_folder: str | None = None
 
 
 class ExperienceBuffer(
@@ -83,7 +96,7 @@ class ExperienceBuffer(
     ]
 ):
     @staticmethod
-    def _cat(t1, t2, size):
+    def _cat(t1: torch.Tensor, t2: torch.Tensor, size: int):
         t2_len = len(t2)
         if t2_len > size:
             # t2 alone is larger than we want; copy the end
@@ -107,7 +120,7 @@ class ExperienceBuffer(
         return t
 
     @staticmethod
-    def _cat_list(cur, new, size):
+    def _cat_list(cur: list[Any], new: list[Any], size: int):
         new_len = len(new)
         if new_len > size:
             t = new[-size:]
@@ -130,13 +143,27 @@ class ExperienceBuffer(
             TrajectoryProcessorData,
         ],
     ):
-        self.trajectory_processor = trajectory_processor
-        self.agent_ids: List[AgentID] = []
-        self.observations: List[ObsType] = []
-        self.actions: List[ActionType] = []
+        self.trajectory_processor: TrajectoryProcessor[
+            TrajectoryProcessorConfig,
+            AgentID,
+            ObsType,
+            ActionType,
+            RewardType,
+            TrajectoryProcessorData,
+        ] = trajectory_processor
+        self.agent_ids: list[AgentID] = []
+        self.observations: list[ObsType] = []
+        self.actions: list[ActionType] = []
+        self.log_probs: torch.Tensor = torch.FloatTensor()
+        self.values: torch.Tensor = torch.FloatTensor()
+        self.advantages: torch.Tensor = torch.FloatTensor()
+        self.rng: np.random.RandomState = np.random.RandomState(0)
+        self.max_size: int
+        self.config: DerivedExperienceBufferConfig[TrajectoryProcessorConfig]
 
-    def load(self, config: DerivedExperienceBufferConfig):
+    def load(self, config: DerivedExperienceBufferConfig[TrajectoryProcessorConfig]):
         self.config = config
+        self.max_size = config.experience_buffer_config.max_size
         self.rng = np.random.RandomState(config.seed)
         self.trajectory_processor.load(
             DerivedTrajectoryProcessorConfig(
@@ -156,6 +183,9 @@ class ExperienceBuffer(
         self.advantages = self.advantages.to(config.learner_device)
 
     def _load_from_checkpoint(self):
+        assert self.config.checkpoint_load_folder is not None, (
+            "Cannot load from checkpoint if checkpoint load folder is None!"
+        )
         # lazy way
         # TODO: don't use pickle for torch things, use torch.load because of map_location. Or maybe define a custom unpickler for this? Or maybe one already exists?
         try:
@@ -177,7 +207,7 @@ class ExperienceBuffer(
                 f"{self.config.agent_controller_name}: Tried to load experience buffer from checkpoint using the file at location {str(os.path.join(self.config.checkpoint_load_folder, EXPERIENCE_BUFFER_FILE))}, but there is no such file! A blank experience buffer will be used instead."
             )
 
-    def save_checkpoint(self, folder_path):
+    def save_checkpoint(self, folder_path: str | os.PathLike[str]):
         os.makedirs(folder_path, exist_ok=True)
         if self.config.experience_buffer_config.save_experience_buffer_in_checkpoint:
             with open(
@@ -199,7 +229,7 @@ class ExperienceBuffer(
 
     # TODO: update docs
     def submit_experience(
-        self, trajectories: List[Trajectory[AgentID, ActionType, ObsType, RewardType]]
+        self, trajectories: list[Trajectory[AgentID, ObsType, ActionType, RewardType]]
     ) -> TrajectoryProcessorData:
         """
         Function to add experience to the buffer.
@@ -225,62 +255,75 @@ class ExperienceBuffer(
             exp_buffer_data
         )
 
-        self.agent_ids = _cat_list(
-            self.agent_ids, agent_ids, self.config.experience_buffer_config.max_size
-        )
+        self.agent_ids = _cat_list(self.agent_ids, agent_ids, self.max_size)
         self.observations = _cat_list(
             self.observations,
             observations,
-            self.config.experience_buffer_config.max_size,
+            self.max_size,
         )
-        self.actions = _cat_list(
-            self.actions, actions, self.config.experience_buffer_config.max_size
-        )
+        self.actions = _cat_list(self.actions, actions, self.max_size)
         self.log_probs = _cat(
             self.log_probs,
             log_probs,
-            self.config.experience_buffer_config.max_size,
+            self.max_size,
         )
         self.values = _cat(
             self.values,
             values,
-            self.config.experience_buffer_config.max_size,
+            self.max_size,
         )
         self.advantages = _cat(
             self.advantages,
             advantages,
-            self.config.experience_buffer_config.max_size,
+            self.max_size,
         )
 
         return trajectory_processor_data
 
     # TODO: tensordict?
     def _get_samples(
-        self, indices
-    ) -> Tuple[
-        Iterable[AgentID],
-        Iterable[ObsType],
-        Iterable[ActionType],
+        self, indices: NDArray[np.long]
+    ) -> tuple[
+        Sequence[AgentID],
+        Sequence[ObsType],
+        Sequence[ActionType],
         torch.Tensor,
         torch.Tensor,
         torch.Tensor,
     ]:
+        py_indices: list[int] = indices.tolist()
         return (
-            [self.agent_ids[index] for index in indices],
-            [self.observations[index] for index in indices],
-            [self.actions[index] for index in indices],
+            [self.agent_ids[index] for index in py_indices],
+            [self.observations[index] for index in py_indices],
+            [self.actions[index] for index in py_indices],
             self.log_probs[indices],
             self.values[indices],
             self.advantages[indices],
         )
 
-    def get_all_batches_shuffled(self, batch_size):
+    def get_all_batches_shuffled(
+        self, batch_size: int
+    ) -> Generator[
+        tuple[
+            Sequence[AgentID],
+            Sequence[ObsType],
+            Sequence[ActionType],
+            torch.Tensor,
+            torch.Tensor,
+            torch.Tensor,
+        ],
+        Any,
+        None,
+    ]:
         """
         Function to return the experience buffer in shuffled batches. Code taken from the stable-baeselines3 buffer:
         https://github.com/DLR-RM/stable-baselines3/blob/2ddf015cd9840a2a1675f5208be6eb2e86e4d045/stable_baselines3/common/buffers.py#L482
         :param batch_size: size of each batch yielded by the generator.
         :return:
         """
+        assert self.config is not None, (
+            "Cannot get batches before calling load with config!"
+        )
         if self.config.learner_device.type != "cpu":
             torch.cuda.current_stream().synchronize()
         total_samples = self.values.shape[0]

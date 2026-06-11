@@ -9,6 +9,7 @@ Description:
 
 import torch
 import torch.nn as nn
+from typing_extensions import override
 
 
 class MapContinuousToAction(nn.Module):
@@ -20,14 +21,15 @@ class MapContinuousToAction(nn.Module):
     a simple linear transform.
     """
 
-    def __init__(self, range_min=0.1, range_max=1):
+    def __init__(self, range_min: float = 0.1, range_max: float = 1):
         super().__init__()
 
         tanh_range = [-1, 1]
-        self.m = (range_max - range_min) / (tanh_range[1] - tanh_range[0])
-        self.b = range_min - tanh_range[0] * self.m
+        self.m: float = (range_max - range_min) / (tanh_range[1] - tanh_range[0])
+        self.b: float = range_min - tanh_range[0] * self.m
 
-    def forward(self, x):
+    @override
+    def forward(self, x: torch.Tensor):
         n = x.shape[-1] // 2
         # map the right half of x from [-1, 1] to [range_min, range_max].
         return x[..., :n], x[..., n:] * self.m + self.b
@@ -41,12 +43,12 @@ class MultiDiscreteRolv(nn.Module):
     each class for each action. Credit to Rolv Arild for coming up with this method.
     """
 
-    def __init__(self, bins):
+    def __init__(self, bins: list[int]):
         super().__init__()
-        self.distribution = None
-        self.bins = bins
+        self.distribution: torch.distributions.Distribution
+        self.bins: list[int] = bins
 
-    def make_distribution(self, logits):
+    def make_distribution(self, logits: torch.Tensor):
         """
         Function to make the multi-discrete categorical distribution for a group of logits.
         :param logits: Logits which parameterize the distribution.
@@ -54,14 +56,14 @@ class MultiDiscreteRolv(nn.Module):
         """
 
         # Split the 21 logits into the expected bins.
-        logits = torch.split(logits, self.bins, dim=-1)
+        logits_split = torch.split(logits, self.bins, dim=-1)
 
         # Separate triplets from the split logits.
-        triplets = torch.stack(logits[:5], dim=-1)
+        triplets = torch.stack(logits_split[:5], dim=-1)
 
         # Separate duets and pad the final dimension with -inf to create triplets.
         duets = torch.nn.functional.pad(
-            torch.stack(logits[5:], dim=-1), pad=(0, 0, 0, 1), value=float("-inf")
+            torch.stack(logits_split[5:], dim=-1), pad=(0, 0, 0, 1), value=float("-inf")
         )
 
         # Un-split the logits now that the duets have been converted into triplets and reshape them into the correct shape.
@@ -70,7 +72,7 @@ class MultiDiscreteRolv(nn.Module):
         # Construct a distribution with our fixed logits.
         self.distribution = torch.distributions.Categorical(logits=logits)
 
-    def log_prob(self, action) -> torch.Tensor:
+    def log_prob(self, action: torch.Tensor) -> torch.Tensor:
         return self.distribution.log_prob(action).sum(dim=-1)
 
     def sample(self):
