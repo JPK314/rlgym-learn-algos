@@ -1,32 +1,42 @@
-from typing import Any, Dict, List
+from typing import Any, Generic
 
-from rlgym_learn_algos.logging import DictMetricsLogger
+from typing_extensions import override
+
+from rlgym_learn_algos.logging import (
+    DictMetricsLogger,
+    MetricsLoggerConfig,
+)
 from rlgym_learn_algos.ppo import PPOAgentControllerConfigModel, PPOAgentControllerData
 
 from .gae_trajectory_processor import GAETrajectoryProcessorData
+from .trajectory_processor import TrajectoryProcessorConfig
 
 
 class PPOMetricsLogger(
     DictMetricsLogger[
-        PPOAgentControllerConfigModel,
+        PPOAgentControllerConfigModel[TrajectoryProcessorConfig, MetricsLoggerConfig],
         None,
         PPOAgentControllerData[GAETrajectoryProcessorData],
     ],
+    Generic[TrajectoryProcessorConfig, MetricsLoggerConfig],
 ):
     def __init__(self):
         self.state_metrics: dict[str, Any] = {}
         self.agent_metrics: dict[str, Any] = {}
 
+    @override
     def get_metrics(self) -> dict[str, Any]:
         return {**self.agent_metrics, **self.state_metrics}
 
-    def collect_env_metrics(self, data: list[dict[str, Any]]):
+    @override
+    def collect_env_metrics(self, data: list[dict[str, Any] | None]):
         """
         Override this function to set self.state_metrics to something else using the data provided.
         The metrics should be nested dictionaries
         """
         self.state_metrics = {}
 
+    @override
     def collect_agent_metrics(
         self, data: PPOAgentControllerData[GAETrajectoryProcessorData]
     ):

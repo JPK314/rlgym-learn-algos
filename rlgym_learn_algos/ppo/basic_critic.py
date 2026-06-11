@@ -28,7 +28,7 @@ class BasicCritic(Critic[AgentID, np.ndarray]):
 
     @override
     def forward(
-        self, agent_id_list: list[AgentID], obs_list: list[np.ndarray]
+        self, agent_id_list: Sequence[AgentID], obs_list: Sequence[np.ndarray]
     ) -> torch.Tensor:
         obs = torch.as_tensor(
             np.array(obs_list), dtype=torch.float32, device=self.device
