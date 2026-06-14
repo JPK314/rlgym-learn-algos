@@ -1,14 +1,22 @@
 from typing import Any, Generic
 
+from rlgym.api import (
+    ActionSpaceType,
+    ActionType,
+    AgentID,
+    ObsSpaceType,
+    ObsType,
+    RewardType,
+    StateType,
+)
 from typing_extensions import override
 
-from rlgym_learn_algos.logging import (
+from ..logging import (
     DictMetricsLogger,
     MetricsLoggerConfig,
 )
-from rlgym_learn_algos.ppo import PPOAgentControllerConfigModel, PPOAgentControllerData
-
 from .gae_trajectory_processor import GAETrajectoryProcessorData
+from .ppo_agent_controller import PPOAgentControllerConfigModel, PPOAgentControllerData
 from .trajectory_processor import TrajectoryProcessorConfig
 
 
@@ -16,9 +24,26 @@ class PPOMetricsLogger(
     DictMetricsLogger[
         PPOAgentControllerConfigModel[TrajectoryProcessorConfig, MetricsLoggerConfig],
         None,
+        AgentID,
+        ObsType,
+        ActionType,
+        RewardType,
+        StateType,
+        ObsSpaceType,
+        ActionSpaceType,
         PPOAgentControllerData[GAETrajectoryProcessorData],
     ],
-    Generic[TrajectoryProcessorConfig, MetricsLoggerConfig],
+    Generic[
+        TrajectoryProcessorConfig,
+        MetricsLoggerConfig,
+        AgentID,
+        ObsType,
+        ActionType,
+        RewardType,
+        StateType,
+        ObsSpaceType,
+        ActionSpaceType,
+    ],
 ):
     def __init__(self):
         self.state_metrics: dict[str, Any] = {}

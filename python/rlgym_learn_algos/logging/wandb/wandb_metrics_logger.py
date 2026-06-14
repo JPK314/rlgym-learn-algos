@@ -7,15 +7,24 @@ from typing import Any, Callable, Generic, TypeVar, cast
 
 import wandb
 from pydantic import BaseModel, Field, InstanceOf, ValidationInfo, model_validator
+from rlgym.api import (
+    ActionSpaceType,
+    ActionType,
+    AgentID,
+    ObsSpaceType,
+    ObsType,
+    RewardType,
+    StateType,
+)
 from rlgym_learn.api import (
     AgentControllerConfig,
-    AgentControllerData,
     DerivedAgentControllerConfig,
 )
 from typing_extensions import override
 
 from ..dict_metrics_logger import DictMetricsLogger
 from ..metrics_logger import (
+    AgentControllerData,
     DerivedMetricsLoggerConfig,
     MetricsLogger,
 )
@@ -63,7 +72,19 @@ class WandbMetricsLoggerConfigModel(
         cls, data: Any, info: ValidationInfo
     ) -> Any:
         wandb_metrics_logger: (
-            WandbMetricsLogger[Any, Any, InstanceOf[BaseModel]] | None
+            WandbMetricsLogger[
+                Any,
+                Any,
+                Any,
+                Any,
+                Any,
+                Any,
+                Any,
+                Any,
+                Any,
+                InnerMetricsLoggerConfig,
+            ]
+            | None
         ) = info.context
         data_dict = data
         if (
@@ -74,17 +95,17 @@ class WandbMetricsLoggerConfigModel(
             data_dict = cast(dict[Any, Any], data_dict)
             inner_metrics_logger_config_raw = data_dict["inner_metrics_logger_config"]
             if isinstance(inner_metrics_logger_config_raw, dict):
-                inner_metrics_logger_config_model_type: type[BaseModel] | None = (
+                inner_metrics_logger_config_model_type = (
                     wandb_metrics_logger.inner_metrics_logger.config_model
                 )
                 if inner_metrics_logger_config_model_type is None:
                     inner_metrics_logger_config = None
                 else:
-                    inner_metrics_logger_config = (
-                        inner_metrics_logger_config_model_type.model_validate(
-                            inner_metrics_logger_config_raw,
-                            context=wandb_metrics_logger.inner_metrics_logger,
-                        )
+                    inner_metrics_logger_config = cast(
+                        BaseModel, inner_metrics_logger_config_model_type
+                    ).model_validate(
+                        inner_metrics_logger_config_raw,
+                        context=wandb_metrics_logger.inner_metrics_logger,
                     )
             else:
                 inner_metrics_logger_config = inner_metrics_logger_config_raw
@@ -102,19 +123,55 @@ class WandbMetricsLogger(
     MetricsLogger[
         AgentControllerConfig,
         WandbMetricsLoggerConfigModel[InnerMetricsLoggerConfig],
+        AgentID,
+        ObsType,
+        ActionType,
+        RewardType,
+        StateType,
+        ObsSpaceType,
+        ActionSpaceType,
         AgentControllerData,
     ],
-    Generic[AgentControllerConfig, AgentControllerData, InnerMetricsLoggerConfig],
+    Generic[
+        AgentControllerConfig,
+        AgentID,
+        ObsType,
+        ActionType,
+        RewardType,
+        StateType,
+        ObsSpaceType,
+        ActionSpaceType,
+        InnerMetricsLoggerConfig,
+        AgentControllerData,
+    ],
 ):
     def __init__(
         self,
         inner_metrics_logger: DictMetricsLogger[
             AgentControllerConfig,
             InnerMetricsLoggerConfig,
+            AgentID,
+            ObsType,
+            ActionType,
+            RewardType,
+            StateType,
+            ObsSpaceType,
+            ActionSpaceType,
             AgentControllerData,
         ],
         additional_derived_config_factory: Callable[
-            [DerivedAgentControllerConfig[AgentControllerConfig]],
+            [
+                DerivedAgentControllerConfig[
+                    AgentControllerConfig,
+                    AgentID,
+                    ObsType,
+                    ActionType,
+                    RewardType,
+                    StateType,
+                    ObsSpaceType,
+                    ActionSpaceType,
+                ]
+            ],
             WandbAdditionalDerivedConfig,
         ]
         | None = None,
@@ -123,11 +180,29 @@ class WandbMetricsLogger(
         self.inner_metrics_logger: DictMetricsLogger[
             AgentControllerConfig,
             InnerMetricsLoggerConfig,
+            AgentID,
+            ObsType,
+            ActionType,
+            RewardType,
+            StateType,
+            ObsSpaceType,
+            ActionSpaceType,
             AgentControllerData,
         ] = inner_metrics_logger
         self.additional_derived_config_factory: (
             Callable[
-                [DerivedAgentControllerConfig[AgentControllerConfig]],
+                [
+                    DerivedAgentControllerConfig[
+                        AgentControllerConfig,
+                        AgentID,
+                        ObsType,
+                        ActionType,
+                        RewardType,
+                        StateType,
+                        ObsSpaceType,
+                        ActionSpaceType,
+                    ]
+                ],
                 WandbAdditionalDerivedConfig,
             ]
             | None
@@ -139,6 +214,13 @@ class WandbMetricsLogger(
             DerivedMetricsLoggerConfig[
                 AgentControllerConfig,
                 WandbMetricsLoggerConfigModel[InnerMetricsLoggerConfig],
+                AgentID,
+                ObsType,
+                ActionType,
+                RewardType,
+                StateType,
+                ObsSpaceType,
+                ActionSpaceType,
             ]
             | None
         ) = None
@@ -171,6 +253,13 @@ class WandbMetricsLogger(
         config: DerivedMetricsLoggerConfig[
             AgentControllerConfig,
             WandbMetricsLoggerConfigModel[InnerMetricsLoggerConfig],
+            AgentID,
+            ObsType,
+            ActionType,
+            RewardType,
+            StateType,
+            ObsSpaceType,
+            ActionSpaceType,
         ],
     ):
         self.config = config

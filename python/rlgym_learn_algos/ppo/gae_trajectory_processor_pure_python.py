@@ -126,7 +126,7 @@ class GAETrajectoryProcessorPurePython(
                 val_pred = value_pred.cpu().numpy()
                 reward_sum += reward
                 if return_std is not None:
-                    norm_reward = np.clip(
+                    norm_reward = np.clip(  # pyright: ignore [ reportUnknownMemberType]
                         reward / return_std,
                         a_min=self.norm_reward_min,
                         a_max=self.norm_reward_max,

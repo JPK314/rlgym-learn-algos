@@ -1,4 +1,5 @@
 # pyright: reportUnusedParameter=false
+#
 from dataclasses import dataclass
 from os import PathLike
 from typing import Generic

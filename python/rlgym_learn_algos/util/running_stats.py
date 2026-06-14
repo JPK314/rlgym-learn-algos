@@ -46,8 +46,8 @@ class WelfordRunningStat(object):
     def update(self, sample: np.ndarray):
         current_count = self.count
         self.count += 1
-        delta = (sample - self.running_mean).reshape(self.running_mean.shape)
-        delta_n = (delta / self.count).reshape(self.running_mean.shape)
+        delta = (sample - self.running_mean).reshape(self.running_mean.shape)  # pyright: ignore [reportUnknownMemberType]
+        delta_n = (delta / self.count).reshape(self.running_mean.shape)  # pyright: ignore [reportUnknownMemberType]
 
         self.running_mean += delta_n
         self.running_variance += delta * delta_n * current_count

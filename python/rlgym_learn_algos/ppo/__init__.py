@@ -28,11 +28,12 @@ __all__ = [
     "TrajectoryProcessorData",
 ]
 
-from rlgym_learn_algos import (
-    RustDerivedGAETrajectoryProcessorConfig,
-    RustGAETrajectoryProcessor,
+from .._rlgym_learn_algos.ppo import (
+    DerivedGAETrajectoryProcessorConfig as RustDerivedGAETrajectoryProcessorConfig,
 )
-
+from .._rlgym_learn_algos.ppo import (
+    GAETrajectoryProcessor as RustGAETrajectoryProcessor,
+)
 from .actor import Actor
 from .basic_critic import BasicCritic
 from .continuous_actor import ContinuousActor

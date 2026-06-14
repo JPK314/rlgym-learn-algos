@@ -42,7 +42,9 @@ wandb = [
 ]
 
 [tool.maturin]
-features = ["pyo3/extension-module"]
+python-source = "python"
+module-name = "rlgym_learn_algos._rlgym_learn_algos"
+bindings = 'pyo3'
 
 [tool.basedpyright]
 reportExplicitAny = false

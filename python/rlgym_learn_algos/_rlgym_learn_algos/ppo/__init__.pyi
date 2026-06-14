@@ -5,12 +5,11 @@ from typing import TYPE_CHECKING, Generic
 from numpy import dtype, float32, float64, ndarray
 from rlgym.api import ActionType, AgentID, ObsType, RewardType
 
-from rlgym_learn_algos.stateful_functions import BatchRewardTypeNumpyConverter
+from ...ppo import Trajectory
+from ...stateful_functions import BatchRewardTypeNumpyConverter
 
 if TYPE_CHECKING:
     from torch import Tensor
-
-    from rlgym_learn_algos.ppo import Trajectory
 
 class DerivedGAETrajectoryProcessorConfig:
     def __new__(

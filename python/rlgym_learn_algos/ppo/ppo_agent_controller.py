@@ -169,7 +169,6 @@ class PPOAgentController(
         ObsSpaceType,
         ActionSpaceType,
         torch.Tensor,
-        PPOAgentControllerData[TrajectoryProcessorData],
     ],
     Generic[
         TrajectoryProcessorConfig,
@@ -204,6 +203,13 @@ class PPOAgentController(
                 TrajectoryProcessorConfig, MetricsLoggerConfig
             ],
             MetricsLoggerConfig,
+            AgentID,
+            ObsType,
+            ActionType,
+            RewardType,
+            StateType,
+            ObsSpaceType,
+            ActionSpaceType,
             PPOAgentControllerData[TrajectoryProcessorData],
         ]
         | None = None,
@@ -237,6 +243,13 @@ class PPOAgentController(
                     TrajectoryProcessorConfig, MetricsLoggerConfig
                 ],
                 MetricsLoggerConfig,
+                AgentID,
+                ObsType,
+                ActionType,
+                RewardType,
+                StateType,
+                ObsSpaceType,
+                ActionSpaceType,
                 PPOAgentControllerData[TrajectoryProcessorData],
             ]
             | None
@@ -274,7 +287,14 @@ class PPOAgentController(
         self.config: DerivedAgentControllerConfig[
             PPOAgentControllerConfigModel[
                 TrajectoryProcessorConfig, MetricsLoggerConfig
-            ]
+            ],
+            AgentID,
+            ObsType,
+            ActionType,
+            RewardType,
+            StateType,
+            ObsSpaceType,
+            ActionSpaceType,
         ]
         self.checkpoints_save_folder: str
 
@@ -294,7 +314,14 @@ class PPOAgentController(
         config: DerivedAgentControllerConfig[
             PPOAgentControllerConfigModel[
                 TrajectoryProcessorConfig, MetricsLoggerConfig
-            ]
+            ],
+            AgentID,
+            ObsType,
+            ActionType,
+            RewardType,
+            StateType,
+            ObsSpaceType,
+            ActionSpaceType,
         ],
     ):
         self.config = config
@@ -613,8 +640,10 @@ class PPOAgentController(
                 dict[AgentID, bool] | None,
             ],
         ],
-    ):
-        env_action_responses: dict[str, EnvActionResponse[AgentID, StateType]] = {}
+    ) -> dict[str, EnvActionResponse[AgentID, StateType] | None]:
+        env_action_responses: dict[
+            str, EnvActionResponse[AgentID, StateType] | None
+        ] = {}
         for env_id in state_info:
             if env_id not in self.current_env_trajectories:
                 # This must be the first env action after a reset, so we step

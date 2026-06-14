@@ -1,3 +1,12 @@
+from rlgym.api import (
+    ActionSpaceType,
+    ActionType,
+    AgentID,
+    ObsSpaceType,
+    ObsType,
+    RewardType,
+    StateType,
+)
 from rlgym_learn.api import DerivedAgentControllerConfig
 
 from ...ppo.ppo_agent_controller import PPOAgentControllerConfigModel
@@ -8,7 +17,14 @@ from .wandb_metrics_logger import WandbAdditionalDerivedConfig
 
 def ppo_additional_derived_config_factory(
     config: DerivedAgentControllerConfig[
-        PPOAgentControllerConfigModel[TrajectoryProcessorConfig, MetricsLoggerConfig]
+        PPOAgentControllerConfigModel[TrajectoryProcessorConfig, MetricsLoggerConfig],
+        AgentID,
+        ObsType,
+        ActionType,
+        RewardType,
+        StateType,
+        ObsSpaceType,
+        ActionSpaceType,
     ],
 ):
     if (

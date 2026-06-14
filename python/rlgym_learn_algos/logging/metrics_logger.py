@@ -5,18 +5,48 @@ from os import PathLike
 from typing import Any, Generic, TypeVar
 
 from pydantic import BaseModel, InstanceOf
+from rlgym.api import (
+    ActionSpaceType,
+    ActionType,
+    AgentID,
+    ObsSpaceType,
+    ObsType,
+    RewardType,
+    StateType,
+)
 from rlgym_learn.api import (
     AgentControllerConfig,
-    AgentControllerData,
     DerivedAgentControllerConfig,
 )
 
 MetricsLoggerConfig = TypeVar("MetricsLoggerConfig", bound=InstanceOf[BaseModel] | None)
+AgentControllerData = TypeVar("AgentControllerData")
 
 
 @dataclass
-class DerivedMetricsLoggerConfig(Generic[AgentControllerConfig, MetricsLoggerConfig]):
-    derived_agent_controller_config: DerivedAgentControllerConfig[AgentControllerConfig]
+class DerivedMetricsLoggerConfig(
+    Generic[
+        AgentControllerConfig,
+        MetricsLoggerConfig,
+        AgentID,
+        ObsType,
+        ActionType,
+        RewardType,
+        StateType,
+        ObsSpaceType,
+        ActionSpaceType,
+    ]
+):
+    derived_agent_controller_config: DerivedAgentControllerConfig[
+        AgentControllerConfig,
+        AgentID,
+        ObsType,
+        ActionType,
+        RewardType,
+        StateType,
+        ObsSpaceType,
+        ActionSpaceType,
+    ]
     metrics_logger_config: MetricsLoggerConfig
     checkpoint_load_folder: str | None = None
 
@@ -26,6 +56,13 @@ class MetricsLogger(
     Generic[
         AgentControllerConfig,
         MetricsLoggerConfig,
+        AgentID,
+        ObsType,
+        ActionType,
+        RewardType,
+        StateType,
+        ObsSpaceType,
+        ActionSpaceType,
         AgentControllerData,
     ]
 ):
@@ -70,7 +107,17 @@ class MetricsLogger(
 
     def load(
         self,
-        config: DerivedMetricsLoggerConfig[AgentControllerConfig, MetricsLoggerConfig],
+        config: DerivedMetricsLoggerConfig[
+            AgentControllerConfig,
+            MetricsLoggerConfig,
+            AgentID,
+            ObsType,
+            ActionType,
+            RewardType,
+            StateType,
+            ObsSpaceType,
+            ActionSpaceType,
+        ],
     ):
         """
         Sets data inside this instance using config, which may include loading data from a checkpoint.

@@ -1,12 +1,18 @@
-from typing import Any
+from typing import Any, Generic
 
-from rlgym_learn.api import AgentControllerConfig, AgentControllerData
+from rlgym.api import (
+    ActionSpaceType,
+    ActionType,
+    AgentID,
+    ObsSpaceType,
+    ObsType,
+    RewardType,
+    StateType,
+)
+from rlgym_learn.api import AgentControllerConfig
 from typing_extensions import override
 
-from .metrics_logger import (
-    MetricsLogger,
-    MetricsLoggerConfig,
-)
+from .metrics_logger import AgentControllerData, MetricsLogger, MetricsLoggerConfig
 
 
 def print_dict(d: dict[Any, Any], indent: str = ""):
@@ -33,6 +39,25 @@ class DictMetricsLogger(
     MetricsLogger[
         AgentControllerConfig,
         MetricsLoggerConfig,
+        AgentID,
+        ObsType,
+        ActionType,
+        RewardType,
+        StateType,
+        ObsSpaceType,
+        ActionSpaceType,
+        AgentControllerData,
+    ],
+    Generic[
+        AgentControllerConfig,
+        MetricsLoggerConfig,
+        AgentID,
+        ObsType,
+        ActionType,
+        RewardType,
+        StateType,
+        ObsSpaceType,
+        ActionSpaceType,
         AgentControllerData,
     ],
 ):

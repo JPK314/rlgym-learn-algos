@@ -12,7 +12,7 @@ use super::trajectory::Trajectory;
 use crate::common::NumpyDtype;
 use crate::misc::torch_cat;
 
-#[pyclass]
+#[pyclass(module = "rlgym_learn_algos._rlgym_learn_algos")]
 pub struct DerivedGAETrajectoryProcessorConfig {
     gamma: Py<PyAny>,
     lambda: Py<PyAny>,
@@ -161,7 +161,7 @@ macro_rules! define_process_trajectories {
 define_process_trajectories!(f64);
 define_process_trajectories!(f32);
 
-#[pyclass]
+#[pyclass(module = "rlgym_learn_algos._rlgym_learn_algos")]
 pub struct GAETrajectoryProcessor {
     gamma: Option<Py<PyAny>>,
     lambda: Option<Py<PyAny>>,
