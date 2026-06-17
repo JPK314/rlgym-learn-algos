@@ -11,18 +11,17 @@ from pydantic import BaseModel
 from rlgym.api import ActionType, AgentID, ObsType, RewardType
 from typing_extensions import override
 
+from .._rlgym_learn_algos.ppo import (
+    DerivedGAETrajectoryProcessorConfig as RustDerivedGAETrajectoryProcessorConfig,
+)
+from .._rlgym_learn_algos.ppo import (
+    GAETrajectoryProcessor as RustGAETrajectoryProcessor,
+)
 from ..stateful_functions import (
     BatchRewardTypeNumpyConverter,
     BatchRewardTypeSimpleNumpyConverter,
 )
 from ..util.running_stats import WelfordRunningStat
-
-from .._rlgym_learn_algos.ppo import (
-    DerivedGAETrajectoryProcessorConfig as RustDerivedGAETrajectoryProcessorConfig
-)
-from .._rlgym_learn_algos.ppo import (
-    GAETrajectoryProcessor as RustGAETrajectoryProcessor,
-)
 from .trajectory import Trajectory
 from .trajectory_processor import (
     TRAJECTORY_PROCESSOR_FILE,

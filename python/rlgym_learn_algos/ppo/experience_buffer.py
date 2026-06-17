@@ -7,7 +7,7 @@ from typing import Any, Generic, cast
 import numpy as np
 import torch
 from numpy.typing import NDArray
-from pydantic import BaseModel, ValidationInfo, model_validator
+from pydantic import BaseModel, Field, ValidationInfo, model_validator
 from rlgym.api import ActionType, AgentID, ObsType, RewardType
 
 from rlgym_learn_algos.util.torch_pydantic import PydanticTorchDevice
@@ -28,7 +28,7 @@ class ExperienceBufferConfigModel(
     BaseModel, Generic[TrajectoryProcessorConfig], extra="forbid"
 ):
     max_size: int = 100000
-    device: PydanticTorchDevice = "cpu"  # pyright: ignore [reportAssignmentType]
+    device: PydanticTorchDevice = Field(default="cpu", validate_default=True)
     save_experience_buffer_in_checkpoint: bool = True
     trajectory_processor_config: TrajectoryProcessorConfig = None  # pyright: ignore [reportAssignmentType]
 
@@ -282,7 +282,7 @@ class ExperienceBuffer(
 
     # TODO: tensordict?
     def _get_samples(
-        self, indices: NDArray[np.long]
+        self, indices: NDArray[np.int64]
     ) -> tuple[
         Sequence[AgentID],
         Sequence[ObsType],

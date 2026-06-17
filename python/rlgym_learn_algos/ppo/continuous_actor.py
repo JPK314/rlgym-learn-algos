@@ -32,13 +32,13 @@ class ContinuousActor(Actor[AgentID, np.ndarray, np.ndarray]):
         self,
         input_shape: int,
         output_shape: int,
-        layer_sizes: tuple[int],
-        device: torch.Device,
+        layer_sizes: tuple[int, ...],
+        device: torch.device,
         var_min: float = 0.1,
         var_max: float = 1.0,
     ):
         super().__init__()
-        self.device: torch.Device = device
+        self.device: torch.device = device
         self.affine_map: nn.Module = torch_functions.MapContinuousToAction(
             range_min=var_min, range_max=var_max
         )

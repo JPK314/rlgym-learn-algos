@@ -7,7 +7,7 @@ from typing import Generic, cast
 
 import numpy as np
 import torch
-from pydantic import BaseModel, model_validator
+from pydantic import BaseModel, Field, model_validator
 from rlgym.api import (
     ActionSpaceType,
     ActionType,
@@ -39,7 +39,7 @@ class PPOLearnerConfigModel(BaseModel, extra="forbid"):
     actor_lr: float = 3e-4
     critic_lr: float = 3e-4
     advantage_standardization: bool = True
-    device: PydanticTorchDevice = "cpu"  # pyright: ignore [reportAssignmentType]
+    device: PydanticTorchDevice = Field(default="cpu", validate_default=True)
     cudnn_benchmark_mode: bool = True
 
     @model_validator(mode="after")

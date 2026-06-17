@@ -16,6 +16,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Config models containing generic other config models are now, as a pattern, validated inside the outer config model's before validation. This affects AgentController, ExperienceBuffer, TrajectoryProcessor, and MetricsLogger instances.
   - In order to support this, the `validate_config` method has been removed in favor of a `config_model` property.
+- Moved Python code (the `rlgym_learn_algos` folder) to inside the `python` folder
+- Moved rust-side module generation from `rlgym_learn_algos.rlgym_learn_algos` to `rlgym_learn_algos._rlgym_learn_algos` and modified internal module structure as well as re-exporting to main module (see below)
+  - The rust `DerivedGAETrajectoryProcessorConfig` and `GAETrajectoryProcessor` classes are now defined in a submodule `rlgym_learn_algos._rlgym_learn_algos.ppo` and are re-exported in `rlgym_learn_algos.ppo` as `RustDerivedGAETrajectoryProcessorConfig` and `RustGAETrajectoryProcessor` respectively
 - Logging subpackage has had wandb moved to a nested subpackage to make the additional dependency clear
 - ExperienceBufferConfigModel's device field now defaults to "cpu" instead of automatically choosing cuda:0 if cuda is available
 - PPOLearnerConfigModel's device field now defaults to "cpu" instead of automatically choosing cuda:0 if cuda is available
@@ -25,6 +28,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The `WandbMetricsLogger` constructor now takes an additional method `additional_derived_config_factory` to map the `DerivedAgentControllerConfig` to `WandbAdditionalDerivedConfig`. An implementation of this method is exported by the wandb subpackage for the `PPOAgentController` class, called `ppo_additional_derived_config_factory`.
 - `advantage_normalization` in the `PPOLearnerConfigModel` has been renamed to `advantage_standardization` to better reflect standard terminology.
 - Generic type variables for config model classes no longer have Optional in the type bound. Instead Optional is placed on the type in the derived config dataclass.
+- Fixed issue where PPOLearnerConfigModel and ExperienceBufferConfigModel default device "cpu" would stay as string after construction due to missing validate_default config
 
 ### Removed
 

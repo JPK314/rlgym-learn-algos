@@ -10,9 +10,11 @@ from .critic import Critic
 
 
 class BasicCritic(Critic[AgentID, np.ndarray]):
-    def __init__(self, input_size: int, layer_sizes: tuple[int], device: torch.Device):
+    def __init__(
+        self, input_size: int, layer_sizes: tuple[int, ...], device: torch.device
+    ):
         super().__init__()
-        self.device: torch.Device = device
+        self.device: torch.device = device
 
         assert len(layer_sizes) != 0, (
             "AT LEAST ONE LAYER MUST BE SPECIFIED TO BUILD THE NEURAL NETWORK!"

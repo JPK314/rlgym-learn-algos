@@ -72,6 +72,11 @@ class _TorchDtypePydanticAnnotation:
         )
 
 
+def print_and_return_same(v):
+    print(f"Torch device: {v}")
+    return v
+
+
 class _TorchDevicePydanticAnnotation:
     @classmethod
     def __get_pydantic_core_schema__(
@@ -81,6 +86,7 @@ class _TorchDevicePydanticAnnotation:
     ) -> core_schema.CoreSchema:
         from_str_schema = core_schema.chain_schema(
             [
+                core_schema.no_info_plain_validator_function(print_and_return_same),
                 core_schema.str_schema(pattern=device_str_regex),
                 core_schema.no_info_plain_validator_function(lambda v: torch.device(v)),
             ]

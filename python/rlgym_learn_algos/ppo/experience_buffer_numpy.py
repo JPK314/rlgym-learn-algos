@@ -135,7 +135,7 @@ class NumpyExperienceBuffer(
 
     @override
     def _get_samples(
-        self, indices: NDArray[np.long]
+        self, indices: NDArray[np.int64]
     ) -> tuple[
         Sequence[AgentID],
         np.ndarray,
