@@ -6,7 +6,7 @@ import pickle
 import random
 import shutil
 import time
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from typing import Any, Generic, TypedDict, cast
 
@@ -33,6 +33,11 @@ from rlgym_learn_algos.logging import (
     MetricsLoggerConfig,
 )
 from rlgym_learn_algos.stateful_functions import ObsStandardizer
+from rlgym_learn_algos.util import (
+    flatten_env_obs_data_dict,
+    unflatten_iterable,
+    unflatten_tensor,
+)
 
 from .actor import Actor
 from .critic import Critic
@@ -168,7 +173,6 @@ class PPOAgentController(
         StateType,
         ObsSpaceType,
         ActionSpaceType,
-        torch.Tensor,
     ],
     Generic[
         TrajectoryProcessorConfig,
@@ -214,9 +218,8 @@ class PPOAgentController(
         ]
         | None = None,
         obs_standardizer: ObsStandardizer[AgentID, ObsType] | None = None,
-        agent_choice_fn: Callable[[list[AgentID]], list[int]] = lambda agent_id_list: (
-            list(range(len(agent_id_list)))
-        ),
+        agent_choice_fn: Callable[[dict[int, list[AgentID]]], dict[int, list[int]]]
+        | None = None,
     ):
         super().__init__()
         self.learner: PPOLearner[
@@ -261,12 +264,16 @@ class PPOAgentController(
             print(
                 "Warning: using an obs standardizer is slow! It is recommended to design your obs to be standardized (i.e. have approximately mean 0 and std 1 for each value) without needing this extra post-processing step."
             )
-        self.agent_choice_fn: Callable[[list[AgentID]], list[int]] = agent_choice_fn
+        self.agent_choice_fn: (
+            Callable[[dict[int, list[AgentID]]], dict[int, list[int]]] | None
+        ) = agent_choice_fn
 
         self.current_env_trajectories: dict[
-            str,
+            int,
             EnvTrajectories[AgentID, ObsType, ActionType, RewardType],
         ] = {}
+        self.current_env_controlled_agent_ids: dict[int, list[AgentID]] = {}
+        self.current_env_log_probs: dict[int, torch.Tensor] = {}
         self.iteration_trajectories: list[
             Trajectory[AgentID, ObsType, ActionType, RewardType]
         ] = []
@@ -325,6 +332,9 @@ class PPOAgentController(
         ],
     ):
         self.config = config
+        assert not self.config.process_config.recalculate_agent_id_every_step, (
+            f"{self.config.agent_controller_name}: PPO Agent Controller cannot handle agent ids being recalculated every step!"
+        )
         print(
             f"{self.config.agent_controller_name}: Using device {config.agent_controller_config.learner_config.device}"
         )
@@ -544,19 +554,61 @@ class PPOAgentController(
                 )
 
     @override
-    def choose_agents(self, agent_id_list: list[AgentID]):
-        return self.agent_choice_fn(agent_id_list)
+    def choose_agents(self, agent_ids: dict[int, list[AgentID]]):
+        if self.agent_choice_fn is None:
+            self.current_env_controlled_agent_ids.update(agent_ids)
+            return None
+
+        agent_id_idxs_choices: dict[int, list[int]] = {}
+        agents_remaining_choices: dict[int, list[AgentID]] = {}
+        for env_id, agent_id_list in agent_ids.items():
+            if env_id in self.current_env_controlled_agent_ids:
+                agent_ids_choice = self.current_env_controlled_agent_ids[env_id]
+                agent_id_idxs_choice: list[int] = []
+                # Assumes that AgentIDs always come in the same order, which is guaranteed by rlgym-learn when recalculate_agent_id_every_step is false
+                idx1 = 0
+                for idx2, agent_id in enumerate(agent_id_list):
+                    if agent_id == agent_ids_choice[idx1]:
+                        agent_id_idxs_choice.append(idx2)
+                        idx1 += 1
+                agent_id_idxs_choices[env_id] = agent_id_idxs_choice
+            else:
+                agents_remaining_choices[env_id] = agent_id_list
+        agents_remaining_choice_results = self.agent_choice_fn(agents_remaining_choices)
+        agent_id_idxs_choices.update(agents_remaining_choice_results)
+
+        self.current_env_controlled_agent_ids.update(
+            {
+                env_id: [
+                    agent_ids[env_id][idx] for idx in agents_remaining_choice_result
+                ]
+                for (
+                    env_id,
+                    agents_remaining_choice_result,
+                ) in agents_remaining_choice_results.items()
+            }
+        )
+
+        return agent_id_idxs_choices
 
     @torch.no_grad
     @override
     def get_actions(
-        self, agent_id_list: list[AgentID], obs_list: list[ObsType]
-    ) -> tuple[Iterable[ActionType], torch.Tensor]:
-        action_list, log_probs = self.learner.actor.get_action(agent_id_list, obs_list)
+        self, env_obs_data_dict: dict[int, tuple[list[AgentID], list[ObsType]]]
+    ) -> Mapping[int, Iterable[ActionType]]:
+        ((agent_id_list, obs_list), flattened_state) = flatten_env_obs_data_dict(
+            env_obs_data_dict
+        )
+
+        actions, log_probs = self.learner.actor.get_action(agent_id_list, obs_list)
+
         if log_probs.dim() == 0:
             # This can happen if the input is a single element
             log_probs = log_probs.unsqueeze(0)
-        return (action_list, log_probs)
+
+        env_action_dict = unflatten_iterable(actions, flattened_state)
+        self.current_env_log_probs.update(unflatten_tensor(log_probs, flattened_state))
+        return env_action_dict
 
     def _standardize_timestep_observations(
         self,
@@ -584,10 +636,9 @@ class PPOAgentController(
     def process_timestep_data(
         self,
         timestep_data: dict[
-            str,
+            int,
             tuple[
                 list[Timestep[AgentID, ObsType, ActionType, RewardType]],
-                torch.Tensor | None,
                 dict[str, Any] | None,
                 StateType | None,
             ],
@@ -597,7 +648,6 @@ class PPOAgentController(
         shared_infos: list[dict[str, Any] | None] = []
         for env_id, (
             env_timesteps,
-            env_log_probs,
             env_shared_info,
             _,
         ) in timestep_data.items():
@@ -606,12 +656,12 @@ class PPOAgentController(
             if env_timesteps:
                 if env_id not in self.current_env_trajectories:
                     self.current_env_trajectories[env_id] = EnvTrajectories(
-                        [timestep.agent_id for timestep in env_timesteps],
-                        self.agent_choice_fn,
+                        [timestep.agent_id for timestep in env_timesteps]
                     )
-                # ActionAssociatedLearningData will always be non-None for step actions, which is the only time env_timesteps will be non-None
                 timesteps_added += self.current_env_trajectories[env_id].add_steps(
-                    env_timesteps, cast(torch.Tensor, env_log_probs)
+                    self.current_env_controlled_agent_ids[env_id],
+                    env_timesteps,
+                    self.current_env_log_probs[env_id],
                 )
             shared_infos.append(env_shared_info)
         self.iteration_timesteps += timesteps_added
@@ -632,7 +682,7 @@ class PPOAgentController(
     def choose_env_actions(
         self,
         state_info: dict[
-            str,
+            int,
             tuple[
                 dict[str, Any] | None,
                 StateType | None,
@@ -640,9 +690,9 @@ class PPOAgentController(
                 dict[AgentID, bool] | None,
             ],
         ],
-    ) -> dict[str, EnvActionResponse[AgentID, StateType] | None]:
+    ) -> dict[int, EnvActionResponse[AgentID, StateType] | None]:
         env_action_responses: dict[
-            str, EnvActionResponse[AgentID, StateType] | None
+            int, EnvActionResponse[AgentID, StateType] | None
         ] = {}
         for env_id in state_info:
             if env_id not in self.current_env_trajectories:
@@ -671,7 +721,7 @@ class PPOAgentController(
 
     @override
     def process_env_actions(
-        self, env_actions: dict[str, EnvActionResponse[AgentID, StateType]]
+        self, env_actions: dict[int, EnvActionResponse[AgentID, StateType]]
     ):
         for env_id, env_action in env_actions.items():
             # this is a getter so we only want to do it once
@@ -679,6 +729,7 @@ class PPOAgentController(
             if enum_type == EnvActionResponseType.STEP:
                 pass
             elif enum_type == EnvActionResponseType.RESET:
+                _ = self.current_env_controlled_agent_ids.pop(env_id, None)
                 env_trajectories = self.current_env_trajectories.pop(env_id)
                 env_trajectories.finalize()
                 self.iteration_trajectories += env_trajectories.get_trajectories()

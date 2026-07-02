@@ -21,6 +21,7 @@ dependencies = [
     "typing_extensions>4.6",
     "rlgym>=2.0.0",
     "rlgym-learn>=0.1.7",
+    "tensordict>=0.13.0",
 ]
 keywords=[
     "rocket-league",

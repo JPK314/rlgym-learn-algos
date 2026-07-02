@@ -1,4 +1,4 @@
-from typing import Callable, Generic
+from typing import Generic
 
 import torch
 from rlgym.api import ActionType, AgentID, ObsType, RewardType
@@ -11,14 +11,11 @@ from .trajectory import Trajectory
 class EnvTrajectories(Generic[AgentID, ObsType, ActionType, RewardType]):
     def __init__(
         self,
-        agent_ids: list[AgentID],
-        agent_choice_fn: Callable[[list[AgentID]], list[int]] = lambda agent_id_list: (
-            list(range(len(agent_id_list)))
-        ),
+        env_agent_ids: list[AgentID],
     ) -> None:
-        self.used_agent_id_idx_map: dict[AgentID, int] = {
-            agent_ids[idx]: idx for idx in agent_choice_fn(agent_ids)
-        }
+        self.used_agent_id_idx_map: dict[AgentID, int] = dict(
+            zip(env_agent_ids, range(len(env_agent_ids)))
+        )
         self.obs_lists: dict[AgentID, list[ObsType]] = {}
         self.action_lists: dict[AgentID, list[ActionType]] = {}
         self.reward_lists: dict[AgentID, list[RewardType]] = {}
@@ -36,9 +33,23 @@ class EnvTrajectories(Generic[AgentID, ObsType, ActionType, RewardType]):
 
     def add_steps(
         self,
+        controlled_agents: list[AgentID],
         timesteps: list[Timestep[AgentID, ObsType, ActionType, RewardType]],
         log_probs: Tensor,
     ):
+        # Intersect used_agent_id_idx_map's keys with controlled_agents. We can't learn from agents we only partially controlled.
+        steps_removed = 0
+        for agent_id in self.used_agent_id_idx_map:
+            if agent_id not in controlled_agents:
+                del self.used_agent_id_idx_map[agent_id]
+                obs_list = self.obs_lists.pop(agent_id)
+                steps_removed += len(obs_list)
+                del self.action_lists[agent_id]
+                del self.reward_lists[agent_id]
+                del self.final_obs[agent_id]
+                del self.dones[agent_id]
+                del self.truncateds[agent_id]
+
         steps_added = 0
         for timestep in timesteps:
             agent_id = timestep.agent_id
@@ -55,9 +66,10 @@ class EnvTrajectories(Generic[AgentID, ObsType, ActionType, RewardType]):
                 if now_done:
                     self.dones[agent_id] = True
                     self.truncateds[agent_id] = timestep.truncated
+
         # We append all the log probs but we will deal with this later when getting trajectories
         self.log_probs_list.append(log_probs)
-        return steps_added
+        return steps_added - steps_removed
 
     def finalize(self):
         """
