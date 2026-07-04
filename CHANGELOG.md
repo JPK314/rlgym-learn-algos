@@ -29,6 +29,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `advantage_normalization` in the `PPOLearnerConfigModel` has been renamed to `advantage_standardization` to better reflect standard terminology.
 - Generic type variables for config model classes no longer have Optional in the type bound. Instead Optional is placed on the type in the derived config dataclass.
 - Fixed issue where PPOLearnerConfigModel and ExperienceBufferConfigModel default device "cpu" would stay as string after construction due to missing validate_default config
+- Update for rlgym-learn 2.0.0a1
+  - The parameter `agent_choice_fn` in the constructor for `PPOAgentController` has had its type updated to reflect how rlgym-learn now supports making choices based on env id as well as agent id, and now defaults to None (meaning all are used).
+  - Log probs are now stored in the `PPOAgentController` and managed during the `get_actions` phase.
+- Choices for AgentIDs in the `PPOAgentController` now only happen once per trajectory instead of every timestep
+- The `PPOAgentController` now enforces that `recalculate_agent_id_every_step` is false in `ProcessConfig` as it breaks how the controller builds up trajectories
+- `EnvTrajectories` has had the `agent_ids` parameter renamed to `env_agent_ids`, and the `agent_choice_fn` has been removed.
+- `EnvTrajectories` now takes an additional parameter `controlled_agents` in the `add_steps` method to filter out any agent ids that had their actions chosen by another agent controller.
 
 ### Removed
 

@@ -7,6 +7,7 @@ Description:
     available in Rocket League.
 """
 
+# TODO: update description
 from collections.abc import Iterable, Sequence
 from typing import Any
 
