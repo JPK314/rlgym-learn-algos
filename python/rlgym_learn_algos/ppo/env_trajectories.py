@@ -1,9 +1,9 @@
 from typing import Generic
 
+import numpy as np
 import torch
 from rlgym.api import ActionType, AgentID, ObsType, RewardType
 from rlgym_learn import Timestep
-from torch import Tensor
 
 from .trajectory import Trajectory
 
@@ -29,13 +29,13 @@ class EnvTrajectories(Generic[AgentID, ObsType, ActionType, RewardType]):
             self.final_obs[agent_id] = None
             self.dones[agent_id] = False
             self.truncateds[agent_id] = False
-        self.log_probs_list: list[Tensor] = []
+        self.log_probs_list: list[list[np.ndarray]] = []
 
     def add_steps(
         self,
         controlled_agents: list[AgentID],
         timesteps: list[Timestep[AgentID, ObsType, ActionType, RewardType]],
-        log_probs: Tensor,
+        log_probs: list[np.ndarray],
     ):
         # Intersect used_agent_id_idx_map's keys with controlled_agents. We can't learn from agents we only partially controlled.
         steps_removed = 0
@@ -87,7 +87,7 @@ class EnvTrajectories(Generic[AgentID, ObsType, ActionType, RewardType]):
         """
         :return: List of trajectories relevant to this env
         """
-        log_probs = torch.stack(self.log_probs_list)
+        log_probs = torch.tensor(np.array(self.log_probs_list))
         trajectories: list[Trajectory[AgentID, ObsType, ActionType, RewardType]] = []
         for agent_id, idx in self.used_agent_id_idx_map.items():
             obs_list = self.obs_lists[agent_id]

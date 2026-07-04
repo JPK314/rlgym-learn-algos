@@ -36,7 +36,6 @@ from rlgym_learn_algos.stateful_functions import ObsStandardizer
 from rlgym_learn_algos.util import (
     flatten_env_obs_data_dict,
     unflatten_iterable,
-    unflatten_tensor,
 )
 
 from .actor import Actor
@@ -273,7 +272,7 @@ class PPOAgentController(
             EnvTrajectories[AgentID, ObsType, ActionType, RewardType],
         ] = {}
         self.current_env_controlled_agent_ids: dict[int, list[AgentID]] = {}
-        self.current_env_log_probs: dict[int, torch.Tensor] = {}
+        self.current_env_log_probs: dict[int, list[np.ndarray]] = {}
         self.iteration_trajectories: list[
             Trajectory[AgentID, ObsType, ActionType, RewardType]
         ] = []
@@ -607,7 +606,9 @@ class PPOAgentController(
             log_probs = log_probs.unsqueeze(0)
 
         env_action_dict = unflatten_iterable(actions, flattened_state)
-        self.current_env_log_probs.update(unflatten_tensor(log_probs, flattened_state))
+        self.current_env_log_probs.update(
+            unflatten_iterable(log_probs.cpu().numpy(), flattened_state)
+        )
         return env_action_dict
 
     def _standardize_timestep_observations(
