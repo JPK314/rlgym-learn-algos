@@ -702,6 +702,7 @@ class PPOAgentController(
                 continue
             done = all(self.current_env_trajectories[env_id].dones.values())
             if done:
+                # TODO: this should happen in process_env_actions instead of here
                 env_action_responses[env_id] = EnvActionResponse.RESET()
                 is_truncated = any(
                     self.current_env_trajectories[env_id].truncateds.values()
