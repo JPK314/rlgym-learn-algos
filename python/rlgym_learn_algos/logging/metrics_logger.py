@@ -37,6 +37,7 @@ class DerivedMetricsLoggerConfig(
         ActionSpaceType,
     ]
 ):
+    controller_name: str | None
     derived_agent_controller_config: DerivedAgentControllerConfig[
         AgentControllerConfig,
         AgentID,

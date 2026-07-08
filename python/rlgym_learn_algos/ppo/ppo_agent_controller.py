@@ -22,22 +22,27 @@ from rlgym.api import (
     RewardType,
     StateType,
 )
-from rlgym_learn import EnvActionResponse, EnvActionResponseType, Timestep
+from rlgym_learn import Timestep
 from rlgym_learn.api import AgentController, DerivedAgentControllerConfig
 from torch import device as _device
 from typing_extensions import override
 
-from rlgym_learn_algos.logging import (
+from rlgym_learn_algos.agent_controller.multi_agent_subcontroller import (
+    DerivedMultiAgentSubcontrollerConfig,
+)
+
+from ..agent_controller import (
+    EnvActionResponse,
+    EnvActionResponseType,
+    MultiAgentSubcontroller,
+)
+from ..logging import (
     DerivedMetricsLoggerConfig,
     MetricsLogger,
     MetricsLoggerConfig,
 )
-from rlgym_learn_algos.stateful_functions import ObsStandardizer
-from rlgym_learn_algos.util import (
-    flatten_env_obs_data_dict,
-    unflatten_iterable,
-)
-
+from ..stateful_functions import ObsStandardizer
+from ..util import flatten_env_obs_data_dict, unflatten_iterable
 from .actor import Actor
 from .critic import Critic
 from .env_trajectories import EnvTrajectories
@@ -149,9 +154,6 @@ class PPOAgentControllerData(Generic[TrajectoryProcessorData]):
     iteration_time: float
     timesteps_collected: int
     timestep_collection_time: float
-    natural_episode_length_mean: float
-    natural_episode_length_median: float
-    percent_truncated: float
 
 
 class PPOAgentStateDict(TypedDict):
@@ -164,6 +166,16 @@ class PPOAgentStateDict(TypedDict):
 
 class PPOAgentController(
     AgentController[
+        PPOAgentControllerConfigModel[TrajectoryProcessorConfig, MetricsLoggerConfig],
+        AgentID,
+        ObsType,
+        ActionType,
+        RewardType,
+        StateType,
+        ObsSpaceType,
+        ActionSpaceType,
+    ],
+    MultiAgentSubcontroller[
         PPOAgentControllerConfigModel[TrajectoryProcessorConfig, MetricsLoggerConfig],
         AgentID,
         ObsType,
@@ -220,7 +232,6 @@ class PPOAgentController(
         agent_choice_fn: Callable[[dict[int, list[AgentID]]], dict[int, list[int]]]
         | None = None,
     ):
-        super().__init__()
         self.learner: PPOLearner[
             TrajectoryProcessorConfig,
             AgentID,
@@ -285,12 +296,9 @@ class PPOAgentController(
         self.timestep_collection_start_time: float = cur_time
         self.timestep_collection_end_time: float
         self.ts_since_last_save: int = 0
-        self.iteration_total_episodes: int = 0
-        self.iteration_truncated_episodes: int = 0
-        self.iteration_natural_episode_lengths: list[int] = []
         self.obs_space: ObsSpaceType
         self.action_space: ActionSpaceType
-        self.config: DerivedAgentControllerConfig[
+        self.config: DerivedMultiAgentSubcontrollerConfig[
             PPOAgentControllerConfigModel[
                 TrajectoryProcessorConfig, MetricsLoggerConfig
             ],
@@ -330,18 +338,47 @@ class PPOAgentController(
             ActionSpaceType,
         ],
     ):
+        self.subcontroller_load(
+            DerivedMultiAgentSubcontrollerConfig[
+                PPOAgentControllerConfigModel[
+                    TrajectoryProcessorConfig, MetricsLoggerConfig
+                ],
+                AgentID,
+                ObsType,
+                ActionType,
+                RewardType,
+                StateType,
+                ObsSpaceType,
+                ActionSpaceType,
+            ].from_agent_controller_config(config, "PPOController")
+        )
+
+    @override
+    def subcontroller_load(
+        self,
+        config: DerivedMultiAgentSubcontrollerConfig[
+            PPOAgentControllerConfigModel[
+                TrajectoryProcessorConfig, MetricsLoggerConfig
+            ],
+            AgentID,
+            ObsType,
+            ActionType,
+            RewardType,
+            StateType,
+            ObsSpaceType,
+            ActionSpaceType,
+        ],
+    ):
         self.config = config
         assert not self.config.process_config.recalculate_agent_id_every_step, (
-            f"{self.config.agent_controller_name}: PPO Agent Controller cannot handle agent ids being recalculated every step!"
+            f"{self.config.subcontroller_name}: PPO Agent Controller cannot handle agent ids being recalculated every step!"
         )
         print(
-            f"{self.config.agent_controller_name}: Using device {config.agent_controller_config.learner_config.device}"
+            f"{self.config.subcontroller_name}: Using device {config.subcontroller_config.learner_config.device}"
         )
-        agent_controller_config = config.agent_controller_config
-        learner_config = config.agent_controller_config.learner_config
-        experience_buffer_config = (
-            config.agent_controller_config.experience_buffer_config
-        )
+        agent_controller_config = config.subcontroller_config
+        learner_config = config.subcontroller_config.learner_config
+        experience_buffer_config = config.subcontroller_config.experience_buffer_config
         learner_checkpoint_load_folder = (
             None
             if agent_controller_config.checkpoint_load_folder is None
@@ -372,14 +409,14 @@ class PPOAgentController(
             # TODO: this doesn't seem to be working
             if abs_save_folder == loaded_checkpoint_runs_folder:
                 print(
-                    f"{config.agent_controller_name}: Using the loaded checkpoint's run folder as the checkpoints save folder."
+                    f"{self.config.subcontroller_name}: Using the loaded checkpoint's run folder as the checkpoints save folder."
                 )
                 checkpoints_save_folder = os.path.abspath(
                     os.path.join(agent_controller_config.checkpoint_load_folder, "..")
                 )
             else:
                 print(
-                    f"{config.agent_controller_name}: Runs folder in config does not align with loaded checkpoint's runs folder. Creating new run in the config-based runs folder."
+                    f"{self.config.subcontroller_name}: Runs folder in config does not align with loaded checkpoint's runs folder. Creating new run in the config-based runs folder."
                 )
                 checkpoints_save_folder = os.path.join(
                     config.save_folder,
@@ -393,13 +430,13 @@ class PPOAgentController(
             )
         self.checkpoints_save_folder = checkpoints_save_folder
         print(
-            f"{config.agent_controller_name}: Saving checkpoints to {self.checkpoints_save_folder}"
+            f"{self.config.subcontroller_name}: Saving checkpoints to {self.checkpoints_save_folder}"
         )
 
         self.learner.load(
             DerivedPPOLearnerConfig(
                 learner_config=learner_config,
-                agent_controller_name=config.agent_controller_name,
+                agent_controller_name=self.config.subcontroller_name,
                 obs_space=self.obs_space,
                 action_space=self.action_space,
                 checkpoint_load_folder=learner_checkpoint_load_folder,
@@ -408,7 +445,7 @@ class PPOAgentController(
         self.experience_buffer.load(
             DerivedExperienceBufferConfig(
                 experience_buffer_config=experience_buffer_config,
-                agent_controller_name=config.agent_controller_name,
+                agent_controller_name=self.config.subcontroller_name,
                 seed=config.base_config.random_seed,
                 dtype=agent_controller_config.learner_config.dtype,
                 learner_device=agent_controller_config.learner_config.device,
@@ -418,8 +455,9 @@ class PPOAgentController(
         if self.metrics_logger is not None:
             self.metrics_logger.load(
                 DerivedMetricsLoggerConfig(
-                    derived_agent_controller_config=self.config,
-                    metrics_logger_config=self.config.agent_controller_config.metrics_logger_config,
+                    controller_name=config.subcontroller_name,
+                    derived_agent_controller_config=config.to_agent_controller_config(),
+                    metrics_logger_config=self.config.subcontroller_config.metrics_logger_config,
                     checkpoint_load_folder=metrics_logger_checkpoint_load_folder,
                 )
             )
@@ -432,13 +470,13 @@ class PPOAgentController(
         random.seed(self.config.base_config.random_seed)
 
     def _load_from_checkpoint(self):
-        assert self.config.agent_controller_config.checkpoint_load_folder is not None, (
+        assert self.config.subcontroller_config.checkpoint_load_folder is not None, (
             "Cannot load from checkpoint when no checkpoint load folder is in config!"
         )
         try:
             with open(
                 os.path.join(
-                    self.config.agent_controller_config.checkpoint_load_folder,
+                    self.config.subcontroller_config.checkpoint_load_folder,
                     ITERATION_TRAJECTORIES_FILE,
                 ),
                 "rb",
@@ -448,13 +486,13 @@ class PPOAgentController(
                 ] = pickle.load(f)
         except FileNotFoundError:
             print(
-                f"{self.config.agent_controller_name}: Tried to load current trajectories from checkpoint using the file at location {str(os.path.join(self.config.agent_controller_config.checkpoint_load_folder, ITERATION_TRAJECTORIES_FILE))}, but there is no such file! Current trajectories will be initialized as an empty list instead."
+                f"{self.config.subcontroller_name}: Tried to load current trajectories from checkpoint using the file at location {str(os.path.join(self.config.subcontroller_config.checkpoint_load_folder, ITERATION_TRAJECTORIES_FILE))}, but there is no such file! Current trajectories will be initialized as an empty list instead."
             )
             iteration_trajectories = []
         try:
             with open(
                 os.path.join(
-                    self.config.agent_controller_config.checkpoint_load_folder,
+                    self.config.subcontroller_config.checkpoint_load_folder,
                     ITERATION_SHARED_INFOS_FILE,
                 ),
                 "rb",
@@ -462,13 +500,13 @@ class PPOAgentController(
                 iteration_shared_infos: list[dict[str, Any] | None] = pickle.load(f)
         except FileNotFoundError:
             print(
-                f"{self.config.agent_controller_name}: Tried to load iteration shared info data from checkpoint using the file at location {str(os.path.join(self.config.agent_controller_config.checkpoint_load_folder, ITERATION_SHARED_INFOS_FILE))}, but there is no such file! Iteration shared info data will be initialized as an empty list instead."
+                f"{self.config.subcontroller_name}: Tried to load iteration shared info data from checkpoint using the file at location {str(os.path.join(self.config.subcontroller_config.checkpoint_load_folder, ITERATION_SHARED_INFOS_FILE))}, but there is no such file! Iteration shared info data will be initialized as an empty list instead."
             )
             iteration_shared_infos = []
         try:
             with open(
                 os.path.join(
-                    self.config.agent_controller_config.checkpoint_load_folder,
+                    self.config.subcontroller_config.checkpoint_load_folder,
                     PPO_AGENT_FILE,
                 ),
                 "rt",
@@ -476,7 +514,7 @@ class PPOAgentController(
                 state: PPOAgentStateDict = json.load(f)
         except FileNotFoundError:
             print(
-                f"{self.config.agent_controller_name}: Tried to load PPO agent miscellaneous state data from checkpoint using the file at location {str(os.path.join(self.config.agent_controller_config.checkpoint_load_folder, PPO_AGENT_FILE))}, but there is no such file! This state data will be initialized as if this were a new run instead."
+                f"{self.config.subcontroller_name}: Tried to load PPO agent miscellaneous state data from checkpoint using the file at location {str(os.path.join(self.config.subcontroller_config.checkpoint_load_folder, PPO_AGENT_FILE))}, but there is no such file! This state data will be initialized as if this were a new run instead."
             )
             state = {
                 "cur_iteration": 0,
@@ -514,7 +552,7 @@ class PPOAgentController(
                 os.path.join(checkpoint_save_folder, METRICS_LOGGER_FOLDER)
             )
 
-        if self.config.agent_controller_config.save_mid_iteration_data_in_checkpoint:
+        if self.config.subcontroller_config.save_mid_iteration_data_in_checkpoint:
             with open(
                 os.path.join(checkpoint_save_folder, ITERATION_TRAJECTORIES_FILE),
                 "wb",
@@ -542,11 +580,11 @@ class PPOAgentController(
         ]
         if (
             len(existing_checkpoints)
-            > self.config.agent_controller_config.n_checkpoints_to_keep
+            > self.config.subcontroller_config.n_checkpoints_to_keep
         ):
             existing_checkpoints.sort()
             for checkpoint_name in existing_checkpoints[
-                : -self.config.agent_controller_config.n_checkpoints_to_keep
+                : -self.config.subcontroller_config.n_checkpoints_to_keep
             ]:
                 shutil.rmtree(
                     os.path.join(self.checkpoints_save_folder, str(checkpoint_name))
@@ -670,56 +708,14 @@ class PPOAgentController(
         self.iteration_shared_infos += shared_infos
         if (
             self.iteration_timesteps
-            >= self.config.agent_controller_config.timesteps_per_iteration
+            >= self.config.subcontroller_config.timesteps_per_iteration
         ):
             self.timestep_collection_end_time = time.perf_counter()
             self._learn()
             self.cur_iteration += 1
-        if self.ts_since_last_save >= self.config.agent_controller_config.save_every_ts:
+        if self.ts_since_last_save >= self.config.subcontroller_config.save_every_ts:
             self.save_checkpoint()
             self.ts_since_last_save = 0
-
-    @override
-    def choose_env_actions(
-        self,
-        state_info: dict[
-            int,
-            tuple[
-                dict[str, Any] | None,
-                StateType | None,
-                dict[AgentID, bool] | None,
-                dict[AgentID, bool] | None,
-            ],
-        ],
-    ) -> dict[int, EnvActionResponse[AgentID, StateType] | None]:
-        env_action_responses: dict[
-            int, EnvActionResponse[AgentID, StateType] | None
-        ] = {}
-        for env_id in state_info:
-            if env_id not in self.current_env_trajectories:
-                # This must be the first env action after a reset, so we step
-                env_action_responses[env_id] = EnvActionResponse.STEP()
-                continue
-            done = all(self.current_env_trajectories[env_id].dones.values())
-            if done:
-                # TODO: this should happen in process_env_actions instead of here
-                env_action_responses[env_id] = EnvActionResponse.RESET()
-                is_truncated = any(
-                    self.current_env_trajectories[env_id].truncateds.values()
-                )
-                if is_truncated:
-                    self.iteration_truncated_episodes += 1
-                episode_length = sum(
-                    len(obs_list)
-                    for obs_list in self.current_env_trajectories[
-                        env_id
-                    ].obs_lists.values()
-                )
-                self.iteration_natural_episode_lengths.append(episode_length)
-                self.iteration_total_episodes += 1
-            else:
-                env_action_responses[env_id] = EnvActionResponse.STEP()
-        return env_action_responses
 
     @override
     def process_env_actions(
@@ -752,23 +748,6 @@ class PPOAgentController(
         )
         ppo_data = self.learner.learn(self.experience_buffer)
 
-        if self.iteration_natural_episode_lengths:
-            natural_lengths_array = np.array(
-                self.iteration_natural_episode_lengths, dtype=np.int64
-            )
-            natural_episode_length_mean = float(natural_lengths_array.mean())
-            natural_episode_length_median = float(np.median(natural_lengths_array))
-        else:
-            natural_episode_length_mean = 0.0
-            natural_episode_length_median = 0.0
-            print(
-                f"{self.config.agent_controller_name}: No natural episode endings this iteration"
-            )
-
-        percent_truncated = self.iteration_truncated_episodes / (
-            self.iteration_total_episodes + 1e-10
-        )
-
         cur_time = time.perf_counter()
         if self.metrics_logger is not None:
             self.metrics_logger.collect_agent_metrics(
@@ -780,9 +759,6 @@ class PPOAgentController(
                     self.iteration_timesteps,
                     self.timestep_collection_end_time
                     - self.timestep_collection_start_time,
-                    natural_episode_length_mean,
-                    natural_episode_length_median,
-                    percent_truncated,
                 )
             )
             self.metrics_logger.collect_env_metrics(self.iteration_shared_infos)
@@ -795,9 +771,6 @@ class PPOAgentController(
         self.iteration_timesteps = 0
         self.iteration_start_time = cur_time
         self.timestep_collection_start_time = time.perf_counter()
-        self.iteration_total_episodes = 0
-        self.iteration_truncated_episodes = 0
-        self.iteration_natural_episode_lengths.clear()
 
     @torch.no_grad()
     def _update_value_predictions(self):
@@ -828,5 +801,5 @@ class PPOAgentController(
         for idx, (start, stop) in enumerate(traj_timestep_idx_ranges):
             self.iteration_trajectories[idx].val_preds = val_preds[start : stop - 1]
             self.iteration_trajectories[idx].final_val_pred = val_preds[stop - 1]
-        if self.config.agent_controller_config.learner_config.device.type != "cpu":
+        if self.config.subcontroller_config.learner_config.device.type != "cpu":
             torch.cuda.current_stream().synchronize()

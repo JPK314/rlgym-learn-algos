@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import Generic, List
+from typing import Generic
 
 from rlgym.api import ActionType, AgentID, ObsType, RewardType
 from torch import Tensor
@@ -7,7 +7,7 @@ from torch import Tensor
 
 @dataclass
 class Trajectory(Generic[AgentID, ObsType, ActionType, RewardType]):
-    __slots__ = (
+    __slots__ = (  # pyright: ignore [reportUnannotatedClassAttribute]
         "agent_id",
         "obs_list",
         "action_list",

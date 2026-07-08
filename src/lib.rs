@@ -1,12 +1,12 @@
 use pyo3::prelude::*;
 
+mod agent_controller;
 mod common;
 mod misc;
-mod multi_agent_controller_manager;
 mod ppo;
 
+pub use agent_controller::{EnvActionResponse, EnvActionResponseType, MultiAgentController};
 pub use common::{flatten_env_obs_data_dict, unflatten_iterable, unflatten_tensor};
-use multi_agent_controller_manager::MultiAgentControllerManager;
 pub use ppo::gae_trajectory_processor::{
     DerivedGAETrajectoryProcessorConfig, GAETrajectoryProcessor,
 };
@@ -38,7 +38,10 @@ fn util<'py>(py: Python<'py>, parent: &Bound<PyModule>) -> PyResult<()> {
 
 fn agent_controller<'py>(py: Python<'py>, parent: &Bound<PyModule>) -> PyResult<()> {
     let sub = PyModule::new(py, "agent_controller")?;
-    sub.add_class::<MultiAgentControllerManager>()?;
+    sub.add_class::<EnvActionResponse>()?;
+    sub.add_class::<EnvActionResponseType>()?;
+    // TODO: add type stubs for MultiAgentController and fix method signatures in MultiAgentController and MultiAgentSubcontroller
+    sub.add_class::<MultiAgentController>()?;
     parent.add_submodule(&sub)?;
     py.import("sys")?.getattr("modules")?.set_item(
         "rlgym_learn_algos._rlgym_learn_algos.agent_controller",
@@ -52,6 +55,9 @@ fn agent_controller<'py>(py: Python<'py>, parent: &Bound<PyModule>) -> PyResult<
 mod _rlgym_learn_algos {
     #[allow(clippy::wildcard_imports)]
     use super::*;
+
+    #[pymodule_export]
+    use {EnvActionResponse, EnvActionResponseType};
 
     #[pymodule_init]
     fn module_init(m: &Bound<'_, PyModule>) -> PyResult<()> {
