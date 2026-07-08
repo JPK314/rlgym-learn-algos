@@ -22,7 +22,7 @@ from rlgym.api import (
     RewardType,
     StateType,
 )
-from rlgym_learn import Timestep
+from rlgym_learn import EnvAction, EnvActionType, Timestep
 from rlgym_learn.api import AgentController, DerivedAgentControllerConfig
 from torch import device as _device
 from typing_extensions import override
@@ -31,11 +31,7 @@ from rlgym_learn_algos.agent_controller.multi_agent_subcontroller import (
     DerivedMultiAgentSubcontrollerConfig,
 )
 
-from ..agent_controller import (
-    EnvActionResponse,
-    EnvActionResponseType,
-    MultiAgentSubcontroller,
-)
+from ..agent_controller import MultiAgentSubcontroller
 from ..logging import (
     DerivedMetricsLoggerConfig,
     MetricsLogger,
@@ -719,19 +715,19 @@ class PPOAgentController(
 
     @override
     def process_env_actions(
-        self, env_actions: dict[int, EnvActionResponse[AgentID, StateType]]
+        self, env_actions: dict[int, EnvAction[AgentID, ActionType, StateType]]
     ):
         for env_id, env_action in env_actions.items():
             # this is a getter so we only want to do it once
             enum_type = env_action.enum_type
-            if enum_type == EnvActionResponseType.STEP:
+            if enum_type == EnvActionType.STEP:
                 pass
-            elif enum_type == EnvActionResponseType.RESET:
+            elif enum_type == EnvActionType.RESET:
                 _ = self.current_env_controlled_agent_ids.pop(env_id, None)
                 env_trajectories = self.current_env_trajectories.pop(env_id)
                 env_trajectories.finalize()
                 self.iteration_trajectories += env_trajectories.get_trajectories()
-            elif enum_type == EnvActionResponseType.SET_STATE:
+            elif enum_type == EnvActionType.SET_STATE:
                 # Can get the desired_state using env_action.desired_state and the prev_timestep_id_dict using env_action.prev_timestep_id_dict, but I'll leave that to you
                 raise NotImplementedError
             else:
