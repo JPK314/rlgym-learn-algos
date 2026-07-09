@@ -225,8 +225,6 @@ class PPOAgentController(
         ]
         | None = None,
         obs_standardizer: ObsStandardizer[AgentID, ObsType] | None = None,
-        agent_choice_fn: Callable[[dict[int, list[AgentID]]], dict[int, list[int]]]
-        | None = None,
     ):
         self.learner: PPOLearner[
             TrajectoryProcessorConfig,
@@ -270,9 +268,6 @@ class PPOAgentController(
             print(
                 "Warning: using an obs standardizer is slow! It is recommended to design your obs to be standardized (i.e. have approximately mean 0 and std 1 for each value) without needing this extra post-processing step."
             )
-        self.agent_choice_fn: (
-            Callable[[dict[int, list[AgentID]]], dict[int, list[int]]] | None
-        ) = agent_choice_fn
 
         self.current_env_trajectories: dict[
             int,
@@ -586,49 +581,22 @@ class PPOAgentController(
                     os.path.join(self.checkpoints_save_folder, str(checkpoint_name))
                 )
 
-    @override
-    def choose_agents(self, agent_ids: dict[int, list[AgentID]]):
-        if self.agent_choice_fn is None:
-            self.current_env_controlled_agent_ids.update(agent_ids)
-            return None
-
-        agent_id_idxs_choices: dict[int, list[int]] = {}
-        agents_remaining_choices: dict[int, list[AgentID]] = {}
-        for env_id, agent_id_list in agent_ids.items():
-            if env_id in self.current_env_controlled_agent_ids:
-                agent_ids_choice = self.current_env_controlled_agent_ids[env_id]
-                agent_id_idxs_choice: list[int] = []
-                # Assumes that AgentIDs always come in the same order, which is guaranteed by rlgym-learn when recalculate_agent_id_every_step is false
-                idx1 = 0
-                for idx2, agent_id in enumerate(agent_id_list):
-                    if agent_id == agent_ids_choice[idx1]:
-                        agent_id_idxs_choice.append(idx2)
-                        idx1 += 1
-                agent_id_idxs_choices[env_id] = agent_id_idxs_choice
-            else:
-                agents_remaining_choices[env_id] = agent_id_list
-        agents_remaining_choice_results = self.agent_choice_fn(agents_remaining_choices)
-        agent_id_idxs_choices.update(agents_remaining_choice_results)
-
-        self.current_env_controlled_agent_ids.update(
-            {
-                env_id: [
-                    agent_ids[env_id][idx] for idx in agents_remaining_choice_result
-                ]
-                for (
-                    env_id,
-                    agents_remaining_choice_result,
-                ) in agents_remaining_choice_results.items()
-            }
-        )
-
-        return agent_id_idxs_choices
-
     @torch.no_grad
     @override
     def get_actions(
         self, env_obs_data_dict: dict[int, tuple[list[AgentID], list[ObsType]]]
     ) -> Mapping[int, Iterable[ActionType]]:
+        if self.config.subcontroller_mode:
+            self.current_env_controlled_agent_ids.update(
+                {
+                    env_id: agent_id_list
+                    for (
+                        env_id,
+                        (agent_id_list, _),
+                    ) in env_obs_data_dict.items()
+                }
+            )
+
         ((agent_id_list, obs_list), flattened_state) = flatten_env_obs_data_dict(
             env_obs_data_dict
         )
@@ -644,6 +612,43 @@ class PPOAgentController(
             unflatten_iterable(log_probs.cpu().numpy(), flattened_state)
         )
         return env_action_dict
+
+    @override
+    def get_env_actions(
+        self,
+        env_obs_data_dict: dict[int, tuple[list[AgentID], list[ObsType]]],
+        env_state_info_dict: dict[
+            int,
+            tuple[
+                dict[str, Any] | None,
+                StateType | None,
+                dict[AgentID, bool] | None,
+                dict[AgentID, bool] | None,
+            ],
+        ],
+    ) -> dict[int, EnvAction[AgentID, ActionType, StateType]]:
+        env_actions: dict[int, EnvAction[AgentID, ActionType, StateType]] = {}
+        step_env_obs_data_dict: dict[int, tuple[list[AgentID], list[ObsType]]] = {}
+        for env_id, obs_data in env_obs_data_dict.items():
+            if env_id not in self.current_env_trajectories:
+                # This must be the first env action after a reset, so we step
+                step_env_obs_data_dict[env_id] = obs_data
+                continue
+            done = all(self.current_env_trajectories[env_id].dones.values())
+            if done:
+                env_actions[env_id] = EnvAction.RESET()
+            else:
+                step_env_obs_data_dict[env_id] = obs_data
+
+        env_actions.update(
+            {
+                env_id: EnvAction.STEP(action_list=action_list)
+                for env_id, action_list in self.get_actions(
+                    step_env_obs_data_dict
+                ).items()
+            }
+        )
+        return env_actions
 
     def _standardize_timestep_observations(
         self,
@@ -694,7 +699,9 @@ class PPOAgentController(
                         [timestep.agent_id for timestep in env_timesteps]
                     )
                 timesteps_added += self.current_env_trajectories[env_id].add_steps(
-                    self.current_env_controlled_agent_ids[env_id],
+                    None
+                    if self.config.subcontroller_mode
+                    else self.current_env_controlled_agent_ids[env_id],
                     env_timesteps,
                     self.current_env_log_probs[env_id],
                 )

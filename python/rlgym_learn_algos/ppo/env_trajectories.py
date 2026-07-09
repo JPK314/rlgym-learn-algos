@@ -33,28 +33,29 @@ class EnvTrajectories(Generic[AgentID, ObsType, ActionType, RewardType]):
 
     def add_steps(
         self,
-        controlled_agents: list[AgentID],
+        controlled_agents: list[AgentID] | None,
         timesteps: list[Timestep[AgentID, ObsType, ActionType, RewardType]],
         log_probs: list[np.ndarray],
     ):
         # Intersect used_agent_id_idx_map's keys with controlled_agents. We can't learn from agents we only partially controlled.
         steps_removed = 0
-        for agent_id in self.used_agent_id_idx_map:
-            if agent_id not in controlled_agents:
-                del self.used_agent_id_idx_map[agent_id]
-                obs_list = self.obs_lists.pop(agent_id)
-                steps_removed += len(obs_list)
-                del self.action_lists[agent_id]
-                del self.reward_lists[agent_id]
-                del self.final_obs[agent_id]
-                del self.dones[agent_id]
-                del self.truncateds[agent_id]
+        if controlled_agents:
+            for agent_id in self.used_agent_id_idx_map:
+                if agent_id not in controlled_agents:
+                    del self.used_agent_id_idx_map[agent_id]
+                    obs_list = self.obs_lists.pop(agent_id)
+                    steps_removed += len(obs_list)
+                    del self.action_lists[agent_id]
+                    del self.reward_lists[agent_id]
+                    del self.final_obs[agent_id]
+                    del self.dones[agent_id]
+                    del self.truncateds[agent_id]
 
         steps_added = 0
         for timestep in timesteps:
             agent_id = timestep.agent_id
             # We only want to process the timesteps of agent ids we included from this env when creating the EnvTrajectories instance
-            if agent_id not in self.used_agent_id_idx_map:
+            if controlled_agents and agent_id not in self.used_agent_id_idx_map:
                 continue
             if not self.dones[agent_id]:
                 steps_added += 1
