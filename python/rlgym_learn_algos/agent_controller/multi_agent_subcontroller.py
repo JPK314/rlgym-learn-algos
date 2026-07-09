@@ -1,6 +1,6 @@
-# pyright: reportUnusedParameter=false
 from __future__ import annotations
 
+from abc import ABC, abstractmethod
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from typing import Any, Generic, TypeVar
@@ -104,6 +104,7 @@ class DerivedMultiAgentSubcontrollerConfig(
 
 
 class MultiAgentSubcontroller(
+    ABC,
     Generic[
         MultiAgentSubcontrollerConfig,
         AgentID,
@@ -116,14 +117,15 @@ class MultiAgentSubcontroller(
     ],
 ):
     @property
+    @abstractmethod
     def config_model(
         self,
     ) -> type[MultiAgentSubcontrollerConfig] | None:
         """
-        Function to return the config model type that your MultiAgentSubcontroller implementation uses. Defaults to None.
+        Function to return the config model type that your MultiAgentSubcontroller implementation uses, or None if no config model is used.
         """
-        return None
 
+    @abstractmethod
     def get_actions(
         self,
         env_obs_data_dict: dict[int, tuple[list[AgentID], list[ObsType]]],
@@ -133,8 +135,8 @@ class MultiAgentSubcontroller(
         :param env_obs_data_dict: Dict with env_ids as keys and, for each env_id, a tuple of parallel lists of AgentIDs and ObsTypes for each agent that needs an action from this agent controller.
         :return: For each env_id in env_obs_data_dict, an iterable parallel with the AgentID and ObsType lists containing the ActionType chosen for each agent.
         """
-        raise NotImplementedError
 
+    @abstractmethod
     def process_env_actions(
         self, env_actions: dict[int, EnvAction[AgentID, ActionType, StateType]]
     ):
@@ -144,8 +146,8 @@ class MultiAgentSubcontroller(
 
         Modifying env_actions is undefined behavior.
         """
-        pass
 
+    @abstractmethod
     def process_timestep_data(
         self,
         timestep_data: dict[
@@ -167,11 +169,14 @@ class MultiAgentSubcontroller(
 
         and the state (if the previous EnvAction for this environment id had send_state=True).
         """
-        pass
 
+    @abstractmethod
     def set_space_types(self, obs_space: ObsSpaceType, action_space: ActionSpaceType):
-        pass
+        """
+        Function to handle managing any state related to space types. Called once before load, may be called at other points according to the env action types.
+        """
 
+    @abstractmethod
     def subcontroller_load(
         self,
         config: DerivedMultiAgentSubcontrollerConfig[
@@ -193,16 +198,15 @@ class MultiAgentSubcontroller(
         If you are implementing a class that is a subclass of both MultiAgentSubcontroller and AgentController, it is recommended to construct an instance of
         DerivedMultiAgentSubcontrollerConfig from the DerivedAgentControllerConfig and pass it to this method instead of impelementing loading twice.
         """
-        pass
 
+    @abstractmethod
     def save_checkpoint(self):
         """
         Function to save a checkpoint of the agent.
         """
-        pass
 
+    @abstractmethod
     def cleanup(self):
         """
         Function to clean up any memory still in use when shutting down.
         """
-        pass

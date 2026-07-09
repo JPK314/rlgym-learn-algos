@@ -808,3 +808,8 @@ class PPOAgentController(
             self.iteration_trajectories[idx].final_val_pred = val_preds[stop - 1]
         if self.config.subcontroller_config.learner_config.device.type != "cpu":
             torch.cuda.current_stream().synchronize()
+
+    @override
+    def cleanup(self):
+        # TODO: anything to do here?
+        pass

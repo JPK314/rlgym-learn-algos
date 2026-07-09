@@ -1,6 +1,5 @@
-# pyright: reportUnusedParameter=false
-
 import os
+from abc import ABC, abstractmethod
 from collections.abc import Mapping
 from typing import Any, Generic, cast
 from weakref import proxy
@@ -139,6 +138,7 @@ class MultiAgentController(
         ObsSpaceType,
         ActionSpaceType,
     ],
+    ABC,
     Generic[
         AgentID,
         ObsType,
@@ -220,6 +220,7 @@ class MultiAgentController(
     ):
         return MultiAgentControllerConfigModel
 
+    @abstractmethod
     def choose_env_actions(
         self,
         env_state_info_dict: dict[
@@ -238,6 +239,8 @@ class MultiAgentController(
         :return: Dictionary with environment ids as keys and EnvActionResponse instances as values. If a EnvActionResponse.STEP instance is returned for an environment,
         then delegate_actions will be called for the agents in those environments.
         If any environment id in the state_info dict is not a key in the returned dict, an exception is thrown.
+
+        The default implementation (called using super().choose_env_actions(...)) may be used for convenience, which returns EnvActionResponse.RESET() for an environment id if all agents in that environment are truncated or terminated in the corresponding state info, and returns EnvActionResponse.STEP() otherwise.
         """
         env_action_responses: dict[int, EnvActionResponse[AgentID, StateType]] = {}
         for env_id, (
@@ -259,6 +262,7 @@ class MultiAgentController(
             env_action_responses[env_id] = EnvActionResponse.STEP()
         return env_action_responses
 
+    @abstractmethod
     def choose_subcontrollers(
         self, agent_ids: dict[int, list[AgentID]]
     ) -> dict[int, list[str]] | None:
@@ -267,7 +271,6 @@ class MultiAgentController(
         :param agent_ids: Dict with env_ids as keys and list of the agent ids available to choose from as values.
         :return: For each env_id, a list of subcontroller names (keys in the agent_subcontrollers dict) parallel to the corresponding AgentID list in agent_ids.
         """
-        raise NotImplementedError
 
     @override
     def get_env_actions(

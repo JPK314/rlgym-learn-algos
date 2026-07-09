@@ -42,6 +42,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `EnvTrajectories` has had the `agent_ids` parameter renamed to `env_agent_ids`, and the `agent_choice_fn` has been removed.
 - `EnvTrajectories` now takes an additional parameter `controlled_agents` in the `add_steps` method to filter out any agent ids that had their actions chosen by another agent controller.
 - In `PPOAgentController`, `natural_episode_length_mean`, `natural_episode_length_median`, and `percent_truncated` are no longer calculated due to ambiguity in what data to include or exclude from the statistics.
+- `TrajectoryProcessor`, `Actor`, `Critic`, `BatchRewardTypeNumpyConverter`, and `ObsStandardizer` now are abstract base classes to properly force implementation of abstract methods for type checkers.
 
 ### Removed
 
