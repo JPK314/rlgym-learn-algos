@@ -1,3 +1,4 @@
+from abc import ABC, abstractmethod
 from typing import Any, Generic
 
 from rlgym.api import (
@@ -48,6 +49,7 @@ class DictMetricsLogger(
         ActionSpaceType,
         AgentControllerData,
     ],
+    ABC,
     Generic[
         AgentControllerConfig,
         MetricsLoggerConfig,
@@ -65,11 +67,11 @@ class DictMetricsLogger(
     This is a specification of the MetricsLogger which provides an additional method get_metrics to retrieve the metrics as a dictionary.
     """
 
+    @abstractmethod
     def get_metrics(self) -> dict[str, Any]:
         """
         :return: metrics data for consumption and side effects by the caller, in the form of a dictionary
         """
-        raise NotImplementedError
 
     @override
     def report_metrics(self):

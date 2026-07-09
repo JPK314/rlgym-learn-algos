@@ -1,5 +1,4 @@
-# pyright: reportUnusedParameter=false
-
+from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from os import PathLike
 from typing import Any, Generic, TypeVar
@@ -54,6 +53,7 @@ class DerivedMetricsLoggerConfig(
 
 # TODO: update docs
 class MetricsLogger(
+    ABC,
     Generic[
         AgentControllerConfig,
         MetricsLoggerConfig,
@@ -65,7 +65,7 @@ class MetricsLogger(
         ObsSpaceType,
         ActionSpaceType,
         AgentControllerData,
-    ]
+    ],
 ):
     """
     This class is designed to be used inside an agent controller to handle the processing of state metrics and agent controller data, and to have some side effects resulting from said processing. It supports config-based saving and loading, and nesting with other MetricsLogger subclasses' config-based saving and loading via the AdditionalDerivedConfig.
@@ -80,32 +80,33 @@ class MetricsLogger(
     """
 
     @property
+    @abstractmethod
     def config_model(self) -> type[MetricsLoggerConfig] | None:
         """
-        Function to return the config model type that your MetricsLogger implementation uses. Defaults to None.
+        Function to return the config model type that your MetricsLogger implementation uses, or None if no config model is used.
         """
-        return None
 
+    @abstractmethod
     def collect_env_metrics(self, data: list[dict[str, Any] | None]):
         """
         This method is intended to allow batch processing of env metrics using the shared info deserialized from the env processes. The result of processing should be stored and used the next time report_metrics is called.
         There is no guarantee that this method will only be called once between each report_metrics call. The list will only contain Nones if shared_info_serde_type is set to None in SerdeTypesModel.
         """
-        pass
 
+    @abstractmethod
     def collect_agent_metrics(self, data: AgentControllerData):
         """
         This method is intended to allow processing of AgentControllerData after it gets finalized by the agent controller. The result of processing should be stored and used the next time report_metrics is called.
         There is no guarantee that this method will only be called once between each report_metrics call.
         """
-        pass
 
+    @abstractmethod
     def report_metrics(self) -> None:
         """
         This method is intended to have arbitrary side effects based on data collected so far. This could be printing, or logging to wandb, or sending data to a redis server, or whatever.
         """
-        raise NotImplementedError
 
+    @abstractmethod
     def load(
         self,
         config: DerivedMetricsLoggerConfig[
@@ -123,10 +124,9 @@ class MetricsLogger(
         """
         Sets data inside this instance using config, which may include loading data from a checkpoint.
         """
-        pass
 
+    @abstractmethod
     def save_checkpoint(self, folder_path: str | PathLike[str]):
         """
         Saves data inside this instance which needs to be checkpointed.
         """
-        pass

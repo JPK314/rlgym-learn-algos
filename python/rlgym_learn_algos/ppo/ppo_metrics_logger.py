@@ -1,3 +1,4 @@
+from os import PathLike
 from typing import Any, Generic
 
 from rlgym.api import (
@@ -11,10 +12,7 @@ from rlgym.api import (
 )
 from typing_extensions import override
 
-from ..logging import (
-    DictMetricsLogger,
-    MetricsLoggerConfig,
-)
+from ..logging import DerivedMetricsLoggerConfig, DictMetricsLogger, MetricsLoggerConfig
 from .gae_trajectory_processor import GAETrajectoryProcessorData
 from .ppo_agent_controller import PPOAgentControllerConfigModel, PPOAgentControllerData
 from .trajectory_processor import TrajectoryProcessorConfig
@@ -48,6 +46,11 @@ class PPOMetricsLogger(
     def __init__(self):
         self.state_metrics: dict[str, Any] = {}
         self.agent_metrics: dict[str, Any] = {}
+
+    @property
+    @override
+    def config_model(self):
+        return None
 
     @override
     def get_metrics(self) -> dict[str, Any]:
@@ -95,3 +98,27 @@ class PPOMetricsLogger(
                 "Critic Update Magnitude": data.ppo_data.critic_update_magnitude,
             },
         }
+
+    @override
+    def load(
+        self,
+        config: DerivedMetricsLoggerConfig[
+            PPOAgentControllerConfigModel[
+                TrajectoryProcessorConfig,
+                MetricsLoggerConfig,
+            ],
+            None,
+            AgentID,
+            ObsType,
+            ActionType,
+            RewardType,
+            StateType,
+            ObsSpaceType,
+            ActionSpaceType,
+        ],
+    ):
+        pass
+
+    @override
+    def save_checkpoint(self, folder_path: str | PathLike[str]):
+        pass
