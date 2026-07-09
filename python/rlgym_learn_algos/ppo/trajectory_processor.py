@@ -1,5 +1,4 @@
-# pyright: reportUnusedParameter=false
-#
+from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from os import PathLike
 from typing import Generic
@@ -29,6 +28,7 @@ class DerivedTrajectoryProcessorConfig(Generic[TrajectoryProcessorConfig]):
 
 
 class TrajectoryProcessor(
+    ABC,
     Generic[
         TrajectoryProcessorConfig,
         AgentID,
@@ -36,15 +36,16 @@ class TrajectoryProcessor(
         ActionType,
         RewardType,
         TrajectoryProcessorData,
-    ]
+    ],
 ):
     @property
+    @abstractmethod
     def config_model(self) -> type[TrajectoryProcessorConfig] | None:
         """
-        Function to return the config model type that your TrajectoryProcessor implementation uses. Defaults to None.
+        Function to return the config model type that your TrajectoryProcessor implementation uses, or None if no config model is used.
         """
-        return None
 
+    @abstractmethod
     def process_trajectories(
         self,
         trajectories: list[Trajectory[AgentID, ObsType, ActionType, RewardType]],
@@ -59,10 +60,11 @@ class TrajectoryProcessor(
             TrajectoryProcessorData (for use in the MetricsLogger).
             log prob, value, and advantage tensors should be with dtype=dtype and device=device.
         """
-        raise NotImplementedError
 
-    def load(self, config: DerivedTrajectoryProcessorConfig[TrajectoryProcessorConfig]):
-        pass
+    @abstractmethod
+    def load(
+        self, config: DerivedTrajectoryProcessorConfig[TrajectoryProcessorConfig]
+    ): ...
 
-    def save_checkpoint(self, folder_path: str | PathLike[str]):
-        pass
+    @abstractmethod
+    def save_checkpoint(self, folder_path: str | PathLike[str]): ...

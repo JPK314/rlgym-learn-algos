@@ -1,11 +1,11 @@
-# pyright: reportUnusedParameter=false
-
+from abc import ABC, abstractmethod
 from typing import Generic
 
 from rlgym.api import AgentID, ObsType
 
 
-class ObsStandardizer(Generic[AgentID, ObsType]):
+class ObsStandardizer(ABC, Generic[AgentID, ObsType]):
+    @abstractmethod
     def standardize(
         self, agent_id_list: list[AgentID], obs_list: list[ObsType]
     ) -> list[ObsType]:
@@ -14,4 +14,3 @@ class ObsStandardizer(Generic[AgentID, ObsType]):
         :param obs_list: List of ObsTypes to standardize.
         :return: List of standardized observations, parallel with input lists.
         """
-        raise NotImplementedError

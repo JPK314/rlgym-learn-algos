@@ -1,3 +1,4 @@
+from abc import ABC, abstractmethod
 from collections.abc import Sequence
 from typing import Generic
 
@@ -7,11 +8,12 @@ from torch import Tensor
 from typing_extensions import override
 
 
-class Critic(nn.Module, Generic[AgentID, ObsType]):
+class Critic(ABC, nn.Module, Generic[AgentID, ObsType]):
     def __init__(self):
         super().__init__()
 
     @override
+    @abstractmethod
     def forward(
         self, agent_id_list: Sequence[AgentID], obs_list: Sequence[ObsType]
     ) -> Tensor:
@@ -20,4 +22,3 @@ class Critic(nn.Module, Generic[AgentID, ObsType]):
         :param obs_list: List of ObsTypes to compute values for.
         :return: Tensor. Must be 0-dimensional for PPO, with dtype float32.
         """
-        raise NotImplementedError
