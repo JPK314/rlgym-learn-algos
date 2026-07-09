@@ -640,14 +640,16 @@ class PPOAgentController(
             else:
                 step_env_obs_data_dict[env_id] = obs_data
 
-        env_actions.update(
-            {
-                env_id: EnvAction.STEP(action_list=action_list)
-                for env_id, action_list in self.get_actions(
-                    step_env_obs_data_dict
-                ).items()
-            }
-        )
+        if step_env_obs_data_dict:
+            env_actions.update(
+                {
+                    env_id: EnvAction.STEP(action_list=action_list)
+                    for env_id, action_list in self.get_actions(
+                        step_env_obs_data_dict
+                    ).items()
+                }
+            )
+        self.process_env_actions(env_actions)
         return env_actions
 
     def _standardize_timestep_observations(
@@ -700,7 +702,7 @@ class PPOAgentController(
                     )
                 timesteps_added += self.current_env_trajectories[env_id].add_steps(
                     None
-                    if self.config.subcontroller_mode
+                    if not self.config.subcontroller_mode
                     else self.current_env_controlled_agent_ids[env_id],
                     env_timesteps,
                     self.current_env_log_probs[env_id],
