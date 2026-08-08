@@ -1,8 +1,8 @@
 __all__ = [
+    "WelfordRunningStat",
     "flatten_env_obs_data_dict",
     "unflatten_iterable",
     "unflatten_tensor",
-    "WelfordRunningStat",
 ]
 
 from .._rlgym_learn_algos.util import (

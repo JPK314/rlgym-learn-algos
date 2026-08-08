@@ -8,16 +8,17 @@ use pyo3::{intern, prelude::*};
 
 use crate::agent_controller::EnvActionResponse;
 
+#[allow(clippy::type_complexity)]
 fn get_actions<'py>(
     agent_subcontroller: &Bound<'py, PyAny>,
     env_obs_data_dict: &HashMap<u128, (Vec<Bound<'py, PyAny>>, Vec<Bound<'py, PyAny>>)>,
 ) -> PyResult<HashMap<u128, Bound<'py, PyAny>>> {
-    Ok(agent_subcontroller
+    agent_subcontroller
         .call_method1(
             intern!(agent_subcontroller.py(), "get_actions"),
             (env_obs_data_dict,),
         )?
-        .extract()?)
+        .extract()
 }
 
 fn choose_subcontrollers<'py>(
@@ -25,19 +26,20 @@ fn choose_subcontrollers<'py>(
     py_multi_agent_controller: &Bound<'py, PyAny>,
     env_agent_id_dict: &HashMap<u128, &Vec<Bound<'py, PyAny>>>,
 ) -> PyResult<HashMap<u128, Vec<String>>> {
-    Ok(py_multi_agent_controller
+    py_multi_agent_controller
         .call_method1(intern!(py, "choose_subcontrollers"), (env_agent_id_dict,))?
-        .extract()?)
+        .extract()
 }
 
+#[allow(clippy::type_complexity)]
 fn choose_env_actions<'py>(
     py: Python<'py>,
     py_multi_agent_controller: &Bound<'py, PyAny>,
     state_info: &HashMap<u128, Bound<'py, PyAny>>,
-) -> PyResult<HashMap<u128, Bound<'py, PyAny>>> {
-    Ok(py_multi_agent_controller
+) -> PyResult<(Py<PyAny>, HashMap<u128, Bound<'py, PyAny>>)> {
+    py_multi_agent_controller
         .call_method1(intern!(py, "choose_env_actions"), (state_info,))?
-        .extract()?)
+        .extract()
 }
 
 fn process_env_actions<'py>(
@@ -119,6 +121,7 @@ pub struct MultiAgentController {
 }
 
 impl MultiAgentController {
+    #[allow(clippy::type_complexity)]
     fn get_actions<'py>(
         &self,
         py: Python<'py>,
@@ -189,11 +192,10 @@ impl MultiAgentController {
             )?;
             for (env_id, batch_action) in subcontroller_env_actions_dict.into_iter() {
                 let idx_list = subcontroller_env_idx_dict.remove(&env_id).unwrap();
-                for (idx, action) in idx_list.into_iter().zip(
-                    batch_action
-                        .extract::<Vec<Bound<'py, PyAny>>>()?
-                        .into_iter(),
-                ) {
+                for (idx, action) in idx_list
+                    .into_iter()
+                    .zip(batch_action.extract::<Vec<Bound<'py, PyAny>>>()?)
+                {
                     agent_subcontrollers_env_actions_dict
                         .get_mut(&env_id)
                         .unwrap()[idx] = Some(action);
@@ -229,15 +231,16 @@ impl MultiAgentController {
         }
     }
 
+    #[allow(clippy::type_complexity)]
     pub fn get_env_actions<'py>(
         &self,
         py: Python<'py>,
         mut env_obs_data_dict: HashMap<u128, (Vec<Bound<'py, PyAny>>, Vec<Bound<'py, PyAny>>)>,
         env_state_info_dict: HashMap<u128, Bound<'py, PyAny>>,
-    ) -> PyResult<Bound<'py, PyDict>> {
+    ) -> PyResult<(Py<PyAny>, Bound<'py, PyDict>)> {
         // Get env action responses from agent controllers
         let py_multi_agent_controller = self.py_multi_agent_controller.bind(py);
-        let env_action_responses =
+        let (n_new_envs, env_action_responses) =
             choose_env_actions(py, py_multi_agent_controller, &env_state_info_dict)?;
         // TODO: Once deferring env actions is implemented, remove len check
         if env_action_responses.len() != env_state_info_dict.len() {
@@ -317,6 +320,6 @@ impl MultiAgentController {
             process_env_actions(agent_subcontroller, &env_actions)?;
         }
 
-        Ok(env_actions)
+        Ok((n_new_envs, env_actions))
     }
 }

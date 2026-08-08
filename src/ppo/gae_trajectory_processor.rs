@@ -195,6 +195,7 @@ impl GAETrajectoryProcessor {
         })
     }
 
+    #[allow(clippy::type_complexity)]
     pub fn process_trajectories<'py>(
         &self,
         py: Python<'py>,

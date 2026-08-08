@@ -1,14 +1,11 @@
 from collections.abc import Iterable, Mapping, Sequence
-from typing import TYPE_CHECKING, Any, TypeAlias, TypeVar
+from typing import TypeVar
 
 from rlgym.api import AgentID, ObsType
 
-T = TypeVar("T")
+_T = TypeVar("_T")
 
-if TYPE_CHECKING:
-    from torch import Tensor
-else:
-    Tensor: TypeAlias = Any
+from torch import Tensor
 
 class FlattenedState: ...
 
@@ -22,6 +19,6 @@ def flatten_env_obs_data_dict(
     ],
 ) -> tuple[tuple[list[AgentID], list[ObsType]], FlattenedState]: ...
 def unflatten_iterable(
-    seq: Iterable[T], state: FlattenedState
-) -> dict[int, list[T]]: ...
+    seq: Iterable[_T], state: FlattenedState
+) -> dict[int, list[_T]]: ...
 def unflatten_tensor(t: Tensor, state: FlattenedState) -> dict[int, Tensor]: ...

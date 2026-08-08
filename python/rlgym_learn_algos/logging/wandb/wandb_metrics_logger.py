@@ -1,9 +1,10 @@
 import json
 import os
 import time
-from dataclasses import dataclass
+from collections.abc import Callable
+from dataclasses import dataclass, field
 from os import PathLike
-from typing import Any, Callable, Generic, TypeVar, cast
+from typing import Any, Generic, TypeVar, cast
 
 import wandb
 from pydantic import BaseModel, Field, InstanceOf, ValidationInfo, model_validator
@@ -115,7 +116,7 @@ class WandbMetricsLoggerConfigModel(
 
 @dataclass
 class WandbAdditionalDerivedConfig:
-    derived_wandb_run_config: dict[str, Any] = Field(default_factory=dict)
+    derived_wandb_run_config: dict[str, Any] = field(default_factory=dict)
     run_suffix: str | None = None
 
 
@@ -344,7 +345,7 @@ class WandbMetricsLogger(
                 self.run_id = None
         except FileNotFoundError:
             print(
-                f"{self.config.controller_name}: Tried to load wandb run from checkpoint using the file at location {str(os.path.join(self.config.checkpoint_load_folder, self.checkpoint_file_name))}, but there is no such file! A new run will be created based on the config values instead."
+                f"{self.config.controller_name}: Tried to load wandb run from checkpoint using the file at location {os.path.join(self.config.checkpoint_load_folder, self.checkpoint_file_name)}, but there is no such file! A new run will be created based on the config values instead."
             )
             self.run_id = None
 

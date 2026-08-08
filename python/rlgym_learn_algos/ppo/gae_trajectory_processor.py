@@ -178,7 +178,7 @@ class GAETrajectoryProcessor(
             self.return_stats.load_state_dict(state["return_running_stats"])
         except FileNotFoundError:
             print(
-                f"{self.config.agent_controller_name}: Tried to load trajectory processor from checkpoint using the trajectory processor file at location {str(os.path.join(self.config.checkpoint_load_folder, TRAJECTORY_PROCESSOR_FILE))}, but there is no such file! Running stats will be initialized as if this were a new run instead."
+                f"{self.config.agent_controller_name}: Tried to load trajectory processor from checkpoint using the trajectory processor file at location {os.path.join(self.config.checkpoint_load_folder, TRAJECTORY_PROCESSOR_FILE)}, but there is no such file! Running stats will be initialized as if this were a new run instead."
             )
 
     @override

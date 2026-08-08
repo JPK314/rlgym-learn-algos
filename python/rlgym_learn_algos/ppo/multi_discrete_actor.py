@@ -13,8 +13,8 @@ from typing import Any
 
 import numpy as np
 import torch
-import torch.nn as nn
 from rlgym.api import AgentID
+from torch import nn
 from typing_extensions import override
 
 from rlgym_learn_algos.util import torch_functions
@@ -65,7 +65,7 @@ class MultiDiscreteFF(Actor[AgentID, np.ndarray, np.ndarray]):
         logits = self.get_output(obs_list)
 
         # TODO not sure how to do this better - very slow atm
-        if "deterministic" in kwargs and kwargs["deterministic"]:
+        if kwargs.get("deterministic"):
             start = 0
             actions: list[torch.Tensor] = []
             for split in self.splits:

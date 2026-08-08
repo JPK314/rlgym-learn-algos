@@ -1,11 +1,8 @@
 # pyright: reportUnusedParameter=false
 
-# pyright: reportUnusedParameter=false
-from __future__ import annotations
-
 from collections.abc import Mapping, Sequence
 from enum import Enum
-from typing import TYPE_CHECKING, Any, Generic, TypeVar, final
+from typing import Any, Generic, TypeVar, final
 
 from rlgym.api import (
     ActionSpaceType,
@@ -18,18 +15,16 @@ from rlgym.api import (
 )
 from rlgym_learn import EnvAction
 
-if TYPE_CHECKING:
-    from ...agent_controller import (
-        MultiAgentSubcontroller,
-    )
-    from ..agent_controller import EnvActionResponse
+from ...agent_controller import (
+    MultiAgentSubcontroller,
+)
 
 __all__ = [
     "EnvActionResponse",
 ]
 
-AgentIDInner = TypeVar("AgentIDInner")
-StateTypeInner = TypeVar("StateTypeInner")
+_AgentIDInner = TypeVar("_AgentIDInner")
+_StateTypeInner = TypeVar("_StateTypeInner")
 
 @final
 class MultiAgentController(
@@ -94,7 +89,7 @@ class MultiAgentController(
                 Mapping[AgentID, bool] | None,
             ],
         ],
-    ) -> dict[int, EnvAction[AgentID, ActionType, StateType]]: ...
+    ) -> tuple[int, dict[int, EnvAction[AgentID, ActionType, StateType]]]: ...
 
 @final
 class EnvActionResponseType(Enum):
@@ -114,8 +109,8 @@ class EnvActionResponse(Generic[AgentID, StateType]):
 
     @final
     class STEP(
-        EnvActionResponse[AgentIDInner, StateTypeInner],
-        Generic[AgentIDInner, StateTypeInner],
+        EnvActionResponse[_AgentIDInner, _StateTypeInner],
+        Generic[_AgentIDInner, _StateTypeInner],
     ):
         __match_args__ = (
             "shared_info_setter_option",
@@ -126,12 +121,12 @@ class EnvActionResponse(Generic[AgentID, StateType]):
             cls,
             shared_info_setter_option: Mapping[str, Any] | None = None,
             send_state: bool = False,
-        ) -> EnvActionResponse.STEP[AgentIDInner, StateTypeInner]: ...
+        ) -> EnvActionResponse.STEP[_AgentIDInner, _StateTypeInner]: ...
 
     @final
     class RESET(
-        EnvActionResponse[AgentIDInner, StateTypeInner],
-        Generic[AgentIDInner, StateTypeInner],
+        EnvActionResponse[_AgentIDInner, _StateTypeInner],
+        Generic[_AgentIDInner, _StateTypeInner],
     ):
         __match_args__ = (
             "shared_info_setter_option",
@@ -142,12 +137,12 @@ class EnvActionResponse(Generic[AgentID, StateType]):
             cls,
             shared_info_setter_option: Mapping[str, Any] | None = None,
             send_state: bool = False,
-        ) -> EnvActionResponse.RESET[AgentIDInner, StateTypeInner]: ...
+        ) -> EnvActionResponse.RESET[_AgentIDInner, _StateTypeInner]: ...
 
     @final
     class SET_STATE(
-        EnvActionResponse[AgentIDInner, StateTypeInner],
-        Generic[AgentIDInner, StateTypeInner],
+        EnvActionResponse[_AgentIDInner, _StateTypeInner],
+        Generic[_AgentIDInner, _StateTypeInner],
     ):
         __match_args__ = (
             "desired_state",
@@ -158,8 +153,8 @@ class EnvActionResponse(Generic[AgentID, StateType]):
 
         def __new__(
             cls,
-            desired_state: StateTypeInner,
+            desired_state: _StateTypeInner,
             shared_info_setter_option: Mapping[str, Any] | None = None,
             send_state: bool = False,
             prev_timestep_id_dict_option: Any | None = None,
-        ) -> EnvActionResponse.SET_STATE[AgentIDInner, StateTypeInner]: ...
+        ) -> EnvActionResponse.SET_STATE[_AgentIDInner, _StateTypeInner]: ...

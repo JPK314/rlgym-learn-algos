@@ -1,54 +1,9 @@
-use std::mem::align_of;
-
-use pyo3::{
-    intern,
-    prelude::*,
-    sync::PyOnceLock,
-    types::{PyAnyMethods, PyDict},
-    Python,
-};
-
-// TODO: clean these up
-pub fn get_bytes_to_alignment<T>(addr: usize) -> usize {
-    let alignment = align_of::<T>();
-    let aligned_addr = addr.wrapping_add(alignment - 1) & 0usize.wrapping_sub(alignment);
-    aligned_addr.wrapping_sub(addr)
-}
-
-pub fn clone_list<'py>(py: Python<'py>, list: &Vec<Py<PyAny>>) -> Vec<Py<PyAny>> {
-    list.iter().map(|obj| obj.clone_ref(py)).collect()
-}
-
-pub fn tensor_slice_1d<'py>(
-    py: Python<'py>,
-    tensor: &Bound<'py, PyAny>,
-    start: usize,
-    stop: usize,
-) -> PyResult<Bound<'py, PyAny>> {
-    Ok(tensor.call_method1(intern!(py, "narrow"), (0, start, stop - start))?)
-}
+use pyo3::{prelude::*, sync::PyOnceLock, types::PyAnyMethods, Python};
 
 pub fn torch_cat<'py>(py: Python<'py>, obj: &[Bound<'py, PyAny>]) -> PyResult<Bound<'py, PyAny>> {
     static INTERNED_CAT: PyOnceLock<Py<PyAny>> = PyOnceLock::new();
-    Ok(INTERNED_CAT
+    INTERNED_CAT
         .get_or_try_init::<_, PyErr>(py, || Ok(py.import("torch")?.getattr("cat")?.unbind()))?
         .bind(py)
-        .call1((obj,))?)
-}
-
-pub fn torch_empty<'py>(
-    shape: &Bound<'py, PyAny>,
-    dtype: &Bound<'py, PyAny>,
-) -> PyResult<Bound<'py, PyAny>> {
-    static INTERNED_EMPTY: PyOnceLock<Py<PyAny>> = PyOnceLock::new();
-    let py = shape.py();
-    Ok(INTERNED_EMPTY
-        .get_or_try_init::<_, PyErr>(py, || Ok(py.import("torch")?.getattr("empty")?.unbind()))?
-        .bind(py)
-        .call(
-            (shape,),
-            Some(&PyDict::from_sequence(
-                &vec![(intern!(py, "dtype"), dtype)].into_pyobject(py)?,
-            )?),
-        )?)
+        .call1((obj,))
 }

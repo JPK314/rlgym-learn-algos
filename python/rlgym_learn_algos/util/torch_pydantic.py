@@ -5,9 +5,7 @@ from pydantic import GetCoreSchemaHandler
 from pydantic_core import core_schema
 
 dtype_str_regex = "|".join(
-    set(
-        f"({str(v)[6:]})" for v in torch.__dict__.values() if isinstance(v, torch.dtype)
-    )
+    {f"({str(v)[6:]})" for v in torch.__dict__.values() if isinstance(v, torch.dtype)}
 )
 device_str_regex = (
     "("

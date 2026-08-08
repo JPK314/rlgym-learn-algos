@@ -22,12 +22,12 @@ from rlgym.api import (
     RewardType,
     StateType,
 )
-from rlgym_learn import EnvAction, EnvActionType, Timestep
+from rlgym_learn import EnvAction, EnvActionType, EnvCloseReason, Timestep
 from rlgym_learn.api import AgentController, DerivedAgentControllerConfig
 from torch import device as _device
 from typing_extensions import override
 
-from rlgym_learn_algos.agent_controller.multi_agent_subcontroller import (
+from rlgym_learn_algos.agent_controller.multi_agent import (
     DerivedMultiAgentSubcontrollerConfig,
 )
 
@@ -287,6 +287,7 @@ class PPOAgentController(
         self.timestep_collection_start_time: float = cur_time
         self.timestep_collection_end_time: float
         self.ts_since_last_save: int = 0
+        self.set_spaces: bool = False
         self.obs_space: ObsSpaceType
         self.action_space: ActionSpaceType
         self.config: DerivedMultiAgentSubcontrollerConfig[
@@ -309,9 +310,38 @@ class PPOAgentController(
         return PPOAgentControllerConfigModel
 
     @override
-    def set_space_types(self, obs_space: ObsSpaceType, action_space: ActionSpaceType):
+    def set_space_types(
+        self,
+        env_spaces_data_dict: dict[
+            int, dict[AgentID, tuple[ObsSpaceType, ActionSpaceType]]
+        ],
+    ):
+        obs_space: ObsSpaceType | None = None
+        action_space: ActionSpaceType | None = None
+        if self.set_spaces:
+            obs_space = self.obs_space
+            action_space = self.action_space
+        for spaces_data_dict in env_spaces_data_dict.values():
+            for agent_obs_space, agent_action_space in spaces_data_dict.values():
+                if obs_space is not None:
+                    assert obs_space == agent_obs_space, (
+                        "Please create a subclass of PPOAgentController and override the set_space_types method if the environment can return more than one distinct ObsSpaceType value"
+                    )
+                obs_space = agent_obs_space
+                if action_space is not None:
+                    assert action_space == agent_action_space, (
+                        "Please create a subclass of PPOAgentController and override the set_space_types method if the environment can return more than one distinct ActionSpaceType value"
+                    )
+                action_space = agent_action_space
+        assert obs_space is not None, (
+            "self.obs_space could not be determined after set_space_types was called"
+        )
+        assert action_space is not None, (
+            "self.action_space could not be determined after set_space_types was called"
+        )
         self.obs_space = obs_space
         self.action_space = action_space
+        self.set_spaces = True
 
     @override
     def load(
@@ -477,7 +507,7 @@ class PPOAgentController(
                 ] = pickle.load(f)
         except FileNotFoundError:
             print(
-                f"{self.config.subcontroller_name}: Tried to load current trajectories from checkpoint using the file at location {str(os.path.join(self.config.subcontroller_config.checkpoint_load_folder, ITERATION_TRAJECTORIES_FILE))}, but there is no such file! Current trajectories will be initialized as an empty list instead."
+                f"{self.config.subcontroller_name}: Tried to load current trajectories from checkpoint using the file at location {os.path.join(self.config.subcontroller_config.checkpoint_load_folder, ITERATION_TRAJECTORIES_FILE)}, but there is no such file! Current trajectories will be initialized as an empty list instead."
             )
             iteration_trajectories = []
         try:
@@ -491,7 +521,7 @@ class PPOAgentController(
                 iteration_shared_infos: list[dict[str, Any] | None] = pickle.load(f)
         except FileNotFoundError:
             print(
-                f"{self.config.subcontroller_name}: Tried to load iteration shared info data from checkpoint using the file at location {str(os.path.join(self.config.subcontroller_config.checkpoint_load_folder, ITERATION_SHARED_INFOS_FILE))}, but there is no such file! Iteration shared info data will be initialized as an empty list instead."
+                f"{self.config.subcontroller_name}: Tried to load iteration shared info data from checkpoint using the file at location {os.path.join(self.config.subcontroller_config.checkpoint_load_folder, ITERATION_SHARED_INFOS_FILE)}, but there is no such file! Iteration shared info data will be initialized as an empty list instead."
             )
             iteration_shared_infos = []
         try:
@@ -505,7 +535,7 @@ class PPOAgentController(
                 state: PPOAgentStateDict = json.load(f)
         except FileNotFoundError:
             print(
-                f"{self.config.subcontroller_name}: Tried to load PPO agent miscellaneous state data from checkpoint using the file at location {str(os.path.join(self.config.subcontroller_config.checkpoint_load_folder, PPO_AGENT_FILE))}, but there is no such file! This state data will be initialized as if this were a new run instead."
+                f"{self.config.subcontroller_name}: Tried to load PPO agent miscellaneous state data from checkpoint using the file at location {os.path.join(self.config.subcontroller_config.checkpoint_load_folder, PPO_AGENT_FILE)}, but there is no such file! This state data will be initialized as if this were a new run instead."
             )
             state = {
                 "cur_iteration": 0,
@@ -626,7 +656,7 @@ class PPOAgentController(
                 dict[AgentID, bool] | None,
             ],
         ],
-    ) -> dict[int, EnvAction[AgentID, ActionType, StateType]]:
+    ) -> tuple[int, dict[int, EnvAction[AgentID, ActionType, StateType]]]:
         env_actions: dict[int, EnvAction[AgentID, ActionType, StateType]] = {}
         step_env_obs_data_dict: dict[int, tuple[list[AgentID], list[ObsType]]] = {}
         for env_id, obs_data in env_obs_data_dict.items():
@@ -650,7 +680,7 @@ class PPOAgentController(
                 }
             )
         self.process_env_actions(env_actions)
-        return env_actions
+        return (0, env_actions)
 
     def _standardize_timestep_observations(
         self,
@@ -810,6 +840,11 @@ class PPOAgentController(
             torch.cuda.current_stream().synchronize()
 
     @override
+    def handle_env_closes(self, env_close_reason_dict: dict[int, EnvCloseReason]):
+        # Nothing to do here, all the dicts using env ids as keys get those keys cleared out upon the next _learn call
+        pass
+
+    @override
     def cleanup(self):
-        # TODO: anything to do here?
+        # Nothing to do here
         pass

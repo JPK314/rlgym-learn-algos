@@ -204,7 +204,7 @@ class ExperienceBuffer(
             self.advantages = state_dict["advantages"]
         except FileNotFoundError:
             print(
-                f"{self.config.agent_controller_name}: Tried to load experience buffer from checkpoint using the file at location {str(os.path.join(self.config.checkpoint_load_folder, EXPERIENCE_BUFFER_FILE))}, but there is no such file! A blank experience buffer will be used instead."
+                f"{self.config.agent_controller_name}: Tried to load experience buffer from checkpoint using the file at location {os.path.join(self.config.checkpoint_load_folder, EXPERIENCE_BUFFER_FILE)}, but there is no such file! A blank experience buffer will be used instead."
             )
 
     def save_checkpoint(self, folder_path: str | os.PathLike[str]):

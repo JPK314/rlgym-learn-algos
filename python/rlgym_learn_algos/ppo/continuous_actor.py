@@ -17,8 +17,8 @@ from typing import Any
 
 import numpy as np
 import torch
-import torch.nn as nn
 from rlgym.api import AgentID
+from torch import nn
 from torch.distributions import Normal
 from typing_extensions import override
 
@@ -99,7 +99,7 @@ class ContinuousActor(Actor[AgentID, np.ndarray, np.ndarray]):
         **kwargs: dict[str, Any],
     ) -> tuple[Iterable[np.ndarray], torch.Tensor]:
         mean, std = self.get_output(obs_list)
-        if "deterministic" in kwargs and kwargs["deterministic"]:
+        if kwargs.get("deterministic"):
             # The probability of a deterministic action occurring is 1 -> log(1) = 0.
             return mean.cpu().numpy(), torch.zeros(mean.shape)
 
@@ -108,7 +108,7 @@ class ContinuousActor(Actor[AgentID, np.ndarray, np.ndarray]):
         log_prob = self.logpdf(action, mean, std)
 
         shape = log_prob.shape
-        if "summed_probs" in kwargs and kwargs["summed_probs"]:
+        if kwargs.get("summed_probs"):
             if len(shape) > 1:
                 log_prob = log_prob.sum(dim=-1)
             else:
