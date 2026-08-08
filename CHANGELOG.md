@@ -36,13 +36,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Fixed issue where PPOLearnerConfigModel and ExperienceBufferConfigModel default device "cpu" would stay as string after construction due to missing validate_default config
 - Update for rlgym-learn 2.0.0a1
   - The parameter `agent_choice_fn` in the constructor for `PPOAgentController` has had its type updated to reflect how rlgym-learn now supports making choices based on env id as well as agent id, and now defaults to None (meaning all are used).
-  - Log probs are now stored in the `PPOAgentController` and managed during the `get_actions` phase.
+  - Log probs are now stored in the `PPOAgentController` and are managed in the `get_actions` method.
+  - The `get_env_actions` method for `PPOAgentController` now explicitly returns 0 processes to add on every invocation to comply with the new method signature
+  - The `set_space_types` method now enforces that only one distinct value for `ActionSpaceType` and `ObsSpaceType` are returned across all environments now that all environments return their corresponding space types.
 - Choices for AgentIDs in the `PPOAgentController` now only happen once per trajectory instead of every timestep
 - The `PPOAgentController` now enforces that `recalculate_agent_id_every_step` is false in `ProcessConfig` as it breaks how the controller builds up trajectories
 - `EnvTrajectories` has had the `agent_ids` parameter renamed to `env_agent_ids`, and the `agent_choice_fn` has been removed.
 - `EnvTrajectories` now takes an additional parameter `controlled_agents` in the `add_steps` method to filter out any agent ids that had their actions chosen by another agent controller.
 - In `PPOAgentController`, `natural_episode_length_mean`, `natural_episode_length_median`, and `percent_truncated` are no longer calculated due to ambiguity in what data to include or exclude from the statistics.
-- `TrajectoryProcessor`, `Actor`, `Critic`, `BatchRewardTypeNumpyConverter`, and `ObsStandardizer` now are abstract base classes to properly force implementation of abstract methods for type checkers.
+- `TrajectoryProcessor`, `Actor`, `Critic`, `MetricsLogger`, `DictMetricsLogger`, `BatchRewardTypeNumpyConverter`, and `ObsStandardizer` now are abstract base classes to properly force implementation of abstract methods for type checkers.
 
 ### Removed
 
