@@ -1,9 +1,9 @@
 __all__ = [
-    "ppo_additional_derived_config_factory",
     "InnerMetricsLoggerConfig",
     "WandbAdditionalDerivedConfig",
     "WandbMetricsLogger",
     "WandbMetricsLoggerConfigModel",
+    "ppo_additional_derived_config_factory",
 ]
 
 from .wandb_additional_config_generators import (

@@ -15,7 +15,13 @@ from rlgym.api import (
     RewardType,
     StateType,
 )
-from rlgym_learn import BaseConfigModel, EnvAction, ProcessConfigModel, Timestep
+from rlgym_learn import (
+    BaseConfigModel,
+    EnvAction,
+    EnvCloseReason,
+    ProcessConfigModel,
+    Timestep,
+)
 from rlgym_learn.api import AgentControllerConfig, DerivedAgentControllerConfig
 
 MultiAgentSubcontrollerConfig = TypeVar(
@@ -171,9 +177,20 @@ class MultiAgentSubcontroller(
         """
 
     @abstractmethod
-    def set_space_types(self, obs_space: ObsSpaceType, action_space: ActionSpaceType):
+    def set_space_types(
+        self,
+        env_spaces_data_dict: dict[
+            int, dict[AgentID, tuple[ObsSpaceType, ActionSpaceType]]
+        ],
+    ):
         """
-        Function to handle managing any state related to space types. Called once before load, may be called at other points according to the env action types.
+        Function to handle managing any state related to space types. Called whenever new env processes are created with all of the new environment ids (including when new env processes are created by the user via the interactive terminal) or when the ENV_SPACES env action is used for a step.
+        """
+
+    @abstractmethod
+    def handle_env_closes(self, env_close_reason_dict: dict[int, EnvCloseReason]):
+        """
+        Function to handle any cleanup and decision making surrounding processes that have closed (either due to crash or due to the CLOSE env action).
         """
 
     @abstractmethod

@@ -2,9 +2,8 @@ from abc import ABC, abstractmethod
 from collections.abc import Sequence
 from typing import Generic
 
-import torch.nn as nn
 from rlgym.api import AgentID, ObsType
-from torch import Tensor
+from torch import Tensor, nn
 from typing_extensions import override
 
 

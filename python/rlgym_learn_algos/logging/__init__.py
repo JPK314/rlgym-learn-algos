@@ -1,7 +1,7 @@
 __all__ = [
     "AgentControllerData",
-    "DictMetricsLogger",
     "DerivedMetricsLoggerConfig",
+    "DictMetricsLogger",
     "MetricsLogger",
     "MetricsLoggerConfig",
 ]

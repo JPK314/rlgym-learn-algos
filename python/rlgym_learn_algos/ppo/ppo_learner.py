@@ -16,7 +16,7 @@ from rlgym.api import (
     ObsType,
     RewardType,
 )
-from torch import nn as nn
+from torch import nn
 
 from rlgym_learn_algos.util.torch_pydantic import (
     PydanticTorchDevice,
@@ -231,7 +231,7 @@ class PPOLearner(
                 self.cumulative_model_updates = misc_state["cumulative_model_updates"]
         except FileNotFoundError:
             print(
-                f"{self.config.agent_controller_name}: Tried to load the PPO learner's misc state from the file at location {str(os.path.join(self.config.checkpoint_load_folder, MISC_STATE))}, but there is no such file! Miscellaneous stats will be initialized as if this were a new run instead."
+                f"{self.config.agent_controller_name}: Tried to load the PPO learner's misc state from the file at location {os.path.join(self.config.checkpoint_load_folder, MISC_STATE)}, but there is no such file! Miscellaneous stats will be initialized as if this were a new run instead."
             )
             self.cumulative_model_updates = 0
 

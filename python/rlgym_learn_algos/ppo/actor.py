@@ -2,9 +2,8 @@ from abc import ABC, abstractmethod
 from collections.abc import Iterable, Sequence
 from typing import Any, Generic
 
-import torch.nn as nn
 from rlgym.api import ActionType, AgentID, ObsType
-from torch import Tensor
+from torch import Tensor, nn
 
 
 class Actor(ABC, nn.Module, Generic[AgentID, ObsType, ActionType]):

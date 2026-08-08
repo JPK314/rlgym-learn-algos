@@ -9,6 +9,7 @@ pub struct FlattenedState {
     idx_list: Vec<usize>,
 }
 
+#[allow(clippy::type_complexity)]
 #[pyfunction]
 pub fn flatten_env_obs_data_dict<'py>(
     env_obs_data_dict: HashMap<u128, (Vec<Bound<'py, PyAny>>, Vec<Bound<'py, PyAny>>)>,

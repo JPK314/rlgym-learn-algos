@@ -40,7 +40,7 @@ def ppo_additional_derived_config_factory(
             "exp_buffer_size": config.agent_controller_config.experience_buffer_config.max_size,
             "timesteps_per_iteration": config.agent_controller_config.timesteps_per_iteration,
             "n_proc": config.process_config.n_proc,
-            "min_process_steps_per_inference": config.process_config.min_process_steps_per_inference,
+            "min_frac_process_responses_per_collection": config.process_config.min_frac_process_responses_per_collection,
             "timestep_limit": config.base_config.timestep_limit,
             **trajectory_processor_fields,
         },

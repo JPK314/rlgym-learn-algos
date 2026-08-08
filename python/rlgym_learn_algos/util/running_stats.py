@@ -19,7 +19,7 @@ class WelfordRunningStatStateDict(TypedDict):
     count: int
 
 
-class WelfordRunningStat(object):
+class WelfordRunningStat:
     """
     https://www.johndcook.com/blog/skewness_kurtosis/
     """

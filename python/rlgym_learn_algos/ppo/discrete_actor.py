@@ -11,8 +11,8 @@ from typing import Any
 
 import numpy as np
 import torch
-import torch.nn as nn
 from rlgym.api import AgentID
+from torch import nn
 from torch.distributions.utils import probs_to_logits
 from typing_extensions import override
 
@@ -62,7 +62,7 @@ class DiscreteFF(Actor[AgentID, np.ndarray, np.ndarray]):
         **kwargs: dict[str, Any],
     ) -> tuple[Iterable[np.ndarray], torch.Tensor]:
         probs = self.get_output(obs_list)
-        if "deterministic" in kwargs and kwargs["deterministic"]:
+        if kwargs.get("deterministic"):
             action = probs.cpu().numpy().argmax(axis=-1)
             return action, torch.zeros(action.shape)
 

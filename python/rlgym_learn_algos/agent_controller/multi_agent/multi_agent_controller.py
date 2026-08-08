@@ -19,12 +19,12 @@ from rlgym.api import (
     RewardType,
     StateType,
 )
-from rlgym_learn import AnyBaseModel, EnvAction, Timestep
+from rlgym_learn import AnyBaseModel, EnvAction, EnvCloseReason, Timestep
 from rlgym_learn.api import AgentController, DerivedAgentControllerConfig
 from typing_extensions import Self, override
 
-from .._rlgym_learn_algos.agent_controller import EnvActionResponse
-from .._rlgym_learn_algos.agent_controller import (
+from ..._rlgym_learn_algos.agent_controller import EnvActionResponse
+from ..._rlgym_learn_algos.agent_controller import (
     MultiAgentController as RustMultiAgentController,
 )
 from .multi_agent_subcontroller import (
@@ -232,12 +232,11 @@ class MultiAgentController(
                 dict[AgentID, bool] | None,
             ],
         ],
-    ) -> dict[int, EnvActionResponse[AgentID, StateType]]:
+    ) -> tuple[int, dict[int, EnvActionResponse[AgentID, StateType]]]:
         """
         Function to choose EnvActionResponse per environment based on environment information.
         :param env_state_info_dict: Dictionary with environment ids as keys and tuples of shared info (if shared_info_serde_type is non-None), StateType (if EnvActionResponse from previous call(s) to choose_env_actions set send_state=True), the present terminated dict for the env (None if env was just reset), and the present truncated dict for the env (None if env was just reset).
-        :return: Dictionary with environment ids as keys and EnvActionResponse instances as values. If a EnvActionResponse.STEP instance is returned for an environment,
-        then delegate_actions will be called for the agents in those environments.
+        :return: Tuple where the first value is the number of new environments to create, and the second value is a dictionary with environment ids as keys and EnvActionResponse instances as values. If a EnvActionResponse.STEP instance is returned for an environment, then delegate_actions will be called for the agents in those environments.
         If any environment id in the state_info dict is not a key in the returned dict, an exception is thrown.
 
         The default implementation (called using super().choose_env_actions(...)) may be used for convenience, which returns EnvActionResponse.RESET() for an environment id if all agents in that environment are truncated or terminated in the corresponding state info, and returns EnvActionResponse.STEP() otherwise.
@@ -260,7 +259,7 @@ class MultiAgentController(
                 env_action_responses[env_id] = EnvActionResponse.RESET()
                 continue
             env_action_responses[env_id] = EnvActionResponse.STEP()
-        return env_action_responses
+        return (0, env_action_responses)
 
     @abstractmethod
     def choose_subcontrollers(
@@ -285,13 +284,13 @@ class MultiAgentController(
                 dict[AgentID, bool] | None,
             ],
         ],
-    ) -> dict[int, EnvAction[AgentID, ActionType, StateType]]:
-        env_actions = self.rust_multi_agent_controller.get_env_actions(
+    ) -> tuple[int, dict[int, EnvAction[AgentID, ActionType, StateType]]]:
+        n_new_envs, env_actions = self.rust_multi_agent_controller.get_env_actions(
             env_obs_data_dict, env_state_info_dict
         )
         for subcontroller in self.subcontrollers_list:
             subcontroller.process_env_actions(env_actions)
-        return env_actions
+        return n_new_envs, env_actions
 
     @override
     def process_timestep_data(
@@ -309,9 +308,19 @@ class MultiAgentController(
             subcontroller.process_timestep_data(timestep_data)
 
     @override
-    def set_space_types(self, obs_space: ObsSpaceType, action_space: ActionSpaceType):
+    def set_space_types(
+        self,
+        env_spaces_data_dict: dict[
+            int, dict[AgentID, tuple[ObsSpaceType, ActionSpaceType]]
+        ],
+    ):
         for subcontroller in self.subcontrollers_list:
-            subcontroller.set_space_types(obs_space, action_space)
+            subcontroller.set_space_types(env_spaces_data_dict)
+
+    @override
+    def handle_env_closes(self, env_close_reason_dict: dict[int, EnvCloseReason]):
+        for subcontroller in self.subcontrollers_list:
+            subcontroller.handle_env_closes(env_close_reason_dict)
 
     @override
     def load(

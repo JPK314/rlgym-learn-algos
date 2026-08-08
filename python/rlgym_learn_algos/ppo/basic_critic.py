@@ -2,8 +2,8 @@ from collections.abc import Sequence
 
 import numpy as np
 import torch
-import torch.nn as nn
 from rlgym.api import AgentID
+from torch import nn
 from typing_extensions import override
 
 from .critic import Critic

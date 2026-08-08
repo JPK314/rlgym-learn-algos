@@ -1,20 +1,15 @@
-from __future__ import annotations
-
-from typing import TYPE_CHECKING, Generic
+from typing import Generic
 
 from numpy import dtype, float32, float64, ndarray
 from rlgym.api import ActionType, AgentID, ObsType, RewardType
+from torch import Tensor
+from typing_extensions import Self
 
 from ...ppo import Trajectory
 from ...stateful_functions import BatchRewardTypeNumpyConverter
 
-if TYPE_CHECKING:
-    from torch import Tensor
-
 class DerivedGAETrajectoryProcessorConfig:
-    def __new__(
-        cls, gamma: float, lmbda: float, dtype: dtype
-    ) -> DerivedGAETrajectoryProcessorConfig: ...
+    def __new__(cls, gamma: float, lmbda: float, dtype: dtype) -> Self: ...
 
 class GAETrajectoryProcessor(Generic[AgentID, ObsType, ActionType, RewardType]):
     def __new__(
