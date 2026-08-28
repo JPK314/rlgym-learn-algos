@@ -7,7 +7,7 @@ from typing import Generic, cast
 
 import numpy as np
 import torch
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, JsonValue, model_validator
 from rlgym.api import (
     ActionSpaceType,
     ActionType,
@@ -23,8 +23,7 @@ from rlgym_learn_algos.util.torch_pydantic import (
     PydanticTorchDtype,
 )
 
-from .actor import Actor
-from .critic import Critic
+from .actor_critic import ActorCritic
 from .experience_buffer import ExperienceBuffer
 from .trajectory_processor import TrajectoryProcessorConfig, TrajectoryProcessorData
 
@@ -36,8 +35,10 @@ class PPOLearnerConfigModel(BaseModel, extra="forbid"):
     n_minibatches: int = 1
     ent_coef: float = 0.005
     clip_range: float = 0.2
-    actor_lr: float = 3e-4
-    critic_lr: float = 3e-4
+    max_grad_norm: float | None = 0.5
+    optimizer_named_parameter_group_kwargs: dict[str, dict[str, JsonValue]] = Field(
+        default={"actor": {"lr": 3e-4}, "critic": {"lr": 3e-4}}
+    )
     advantage_standardization: bool = True
     device: PydanticTorchDevice = Field(default="cpu", validate_default=True)
     cudnn_benchmark_mode: bool = True
@@ -52,7 +53,7 @@ class PPOLearnerConfigModel(BaseModel, extra="forbid"):
 @dataclass
 class DerivedPPOLearnerConfig(Generic[ObsSpaceType, ActionSpaceType]):
     learner_config: PPOLearnerConfigModel
-    agent_controller_name: str
+    agent_controller_name: str | None
     obs_space: ObsSpaceType
     action_space: ActionSpaceType
     checkpoint_load_folder: str | None = None
@@ -70,10 +71,8 @@ class PPOData:
     critic_update_magnitude: float
 
 
-ACTOR_FILE = "actor.pt"
-ACTOR_OPTIMIZER_FILE = "actor_optimizer.pt"
-CRITIC_FILE = "critic.pt"
-CRITIC_OPTIMIZER_FILE = "critic_optimizer.pt"
+ACTOR_CRITIC_FILE = "actor_critic.pt"
+OPTIMIZERS_FILE = "optimizers.pt"
 MISC_STATE = "misc.json"
 
 
@@ -91,29 +90,41 @@ class PPOLearner(
 ):
     def __init__(
         self,
-        actor_factory: Callable[
-            [ObsSpaceType, ActionSpaceType, torch.device],
-            Actor[AgentID, ObsType, ActionType],
+        actor_critic_factory: Callable[
+            [ObsSpaceType, ActionSpaceType, torch.dtype, torch.device, str | None],
+            ActorCritic[AgentID, ObsType, ActionType],
         ],
-        critic_factory: Callable[
-            [ObsSpaceType, torch.device], Critic[AgentID, ObsType]
+        optimizers_factory: Callable[
+            [
+                ActorCritic[AgentID, ObsType, ActionType],
+                dict[str, dict[str, JsonValue]],
+                str | None,
+            ],
+            list[torch.optim.Optimizer],
         ],
     ):
-        self.actor_factory: Callable[
-            [ObsSpaceType, ActionSpaceType, torch.device],
-            Actor[AgentID, ObsType, ActionType],
-        ] = actor_factory
-        self.critic_factory: Callable[
-            [ObsSpaceType, torch.device], Critic[AgentID, ObsType]
-        ] = critic_factory
+        self.actor_critic_factory: Callable[
+            [ObsSpaceType, ActionSpaceType, torch.dtype, torch.device, str | None],
+            ActorCritic[AgentID, ObsType, ActionType],
+        ] = actor_critic_factory
+        self.optimizers_factory: Callable[
+            [
+                ActorCritic[AgentID, ObsType, ActionType],
+                dict[str, dict[str, JsonValue]],
+                str | None,
+            ],
+            list[torch.optim.Optimizer],
+        ] = optimizers_factory
         self.critic_loss_fn: nn.Module = torch.nn.MSELoss()
         self.config: DerivedPPOLearnerConfig[ObsSpaceType, ActionSpaceType]
-        self.actor: Actor[AgentID, ObsType, ActionType]
-        self.critic: Critic[AgentID, ObsType]
-        self.actor_optimizer: torch.optim.Optimizer
-        self.critic_optimizer: torch.optim.Optimizer
+        self.log_prefix: str
+        self.actor_critic: ActorCritic[AgentID, ObsType, ActionType]
+        self.optimizers: list[torch.optim.Optimizer]
         self.cumulative_model_updates: int
         self.minibatch_size: int
+        self.batch_advantages: torch.Tensor
+        self.batch_old_probs: torch.Tensor
+        self.batch_target_values: torch.Tensor
 
     def load(self, config: DerivedPPOLearnerConfig[ObsSpaceType, ActionSpaceType]):
         self.config = config
@@ -124,70 +135,67 @@ class PPOLearner(
         ):
             torch.backends.cudnn.benchmark = True
 
-        self.actor = self.actor_factory(
-            config.obs_space, config.action_space, config.learner_config.device
+        self.actor_critic = self.actor_critic_factory(
+            config.obs_space,
+            config.action_space,
+            config.learner_config.dtype,
+            config.learner_config.device,
+            config.agent_controller_name,
         )
-        self.critic = self.critic_factory(
-            config.obs_space, config.learner_config.device
+        self.optimizers = self.optimizers_factory(
+            self.actor_critic,
+            self.config.learner_config.optimizer_named_parameter_group_kwargs,
+            config.agent_controller_name,
         )
-
-        self.actor_optimizer = torch.optim.Adam(
-            self.actor.parameters(), lr=self.config.learner_config.actor_lr
-        )
-        self.critic_optimizer = torch.optim.Adam(
-            self.critic.parameters(), lr=self.config.learner_config.critic_lr
-        )
-
-        # Calculate parameter counts
-        actor_params = self.actor.parameters()
-        critic_params = self.critic.parameters()
-
-        trainable_actor_parameters = filter(lambda p: p.requires_grad, actor_params)
-        actor_params_count = sum(p.numel() for p in trainable_actor_parameters)
-
-        trainable_critic_parameters = filter(lambda p: p.requires_grad, critic_params)
-        critic_params_count = sum(p.numel() for p in trainable_critic_parameters)
-
-        total_parameters = actor_params_count + critic_params_count
-
-        # Display in a structured manner
-        print(f"{self.config.agent_controller_name}: Trainable Parameters:")
-        print(f"{self.config.agent_controller_name}: {'Component':<10} {'Count':<10}")
-        print("-" * 20)
-        print(
-            f"{self.config.agent_controller_name}: {'Policy':<10} {actor_params_count:<10}"
-        )
-        print(
-            f"{self.config.agent_controller_name}: {'Critic':<10} {critic_params_count:<10}"
-        )
-        print("-" * 20)
-        print(
-            f"{self.config.agent_controller_name}: {'Total':<10} {total_parameters:<10}"
-        )
-        print(
-            f"{self.config.agent_controller_name}: Current Policy Learning Rate: {self.config.learner_config.actor_lr}"
-        )
-        print(
-            f"{self.config.agent_controller_name}: Current Critic Learning Rate: {self.config.learner_config.critic_lr}"
+        self.log_prefix = (
+            f"{config.agent_controller_name}:"
+            if config.agent_controller_name is not None
+            else ""
         )
 
         self.cumulative_model_updates = 0
 
         if self.config.checkpoint_load_folder is not None:
+            # Save kwargs from optimizer factory
+            optimizer_groups_kwargs = [
+                [
+                    {
+                        k: v
+                        for k, v in group.items()
+                        if k not in ("params", "param_names")
+                    }
+                    for group in optimizer.param_groups
+                ]
+                for optimizer in self.optimizers
+            ]
             self._load_from_checkpoint()
-            # We want to use the LR from the config, not the checkpoint
-            self.actor_optimizer.param_groups[0]["lr"] = (
-                self.config.learner_config.actor_lr
-            )
-            self.critic_optimizer.param_groups[0]["lr"] = (
-                self.config.learner_config.critic_lr
-            )
+            # Put kwargs back into optimizers after they were overwritten by checkpoint
+            for optimizer, groups_kwargs in zip(
+                self.optimizers, optimizer_groups_kwargs
+            ):
+                for group, group_kwargs in zip(optimizer.param_groups, groups_kwargs):
+                    group.update(group_kwargs)
 
         self.minibatch_size = int(
             np.ceil(
                 self.config.learner_config.batch_size
                 / self.config.learner_config.n_minibatches
             )
+        )
+        self.batch_advantages = torch.empty(
+            self.config.learner_config.batch_size,
+            dtype=config.learner_config.dtype,
+            device=config.learner_config.device,
+        )
+        self.batch_old_probs = torch.empty(
+            self.config.learner_config.batch_size,
+            dtype=config.learner_config.dtype,
+            device=config.learner_config.device,
+        )
+        self.batch_target_values = torch.empty(
+            self.config.learner_config.batch_size,
+            dtype=config.learner_config.dtype,
+            device=config.learner_config.device,
         )
 
     def _load_from_checkpoint(self):
@@ -196,33 +204,21 @@ class PPOLearner(
         )
 
         assert os.path.exists(self.config.checkpoint_load_folder), (
-            f"{self.config.agent_controller_name}: PPO Learner cannot find folder: {self.config.checkpoint_load_folder}"
+            f"{self.log_prefix} PPO Learner cannot find folder: {self.config.checkpoint_load_folder}"
         )
 
-        _ = self.actor.load_state_dict(
+        _ = self.actor_critic.load_state_dict(
             torch.load(
-                os.path.join(self.config.checkpoint_load_folder, ACTOR_FILE),
+                os.path.join(self.config.checkpoint_load_folder, ACTOR_CRITIC_FILE),
                 map_location=self.config.learner_config.device,
             )
         )
-        _ = self.critic.load_state_dict(
-            torch.load(
-                os.path.join(self.config.checkpoint_load_folder, CRITIC_FILE),
-                map_location=self.config.learner_config.device,
-            )
+        optimizer_state_dicts = torch.load(
+            os.path.join(self.config.checkpoint_load_folder, OPTIMIZERS_FILE),
+            map_location=self.config.learner_config.device,
         )
-        self.actor_optimizer.load_state_dict(
-            torch.load(
-                os.path.join(self.config.checkpoint_load_folder, ACTOR_OPTIMIZER_FILE),
-                map_location=self.config.learner_config.device,
-            )
-        )
-        self.critic_optimizer.load_state_dict(
-            torch.load(
-                os.path.join(self.config.checkpoint_load_folder, CRITIC_OPTIMIZER_FILE),
-                map_location=self.config.learner_config.device,
-            )
-        )
+        for optimizer, state_dict in zip(self.optimizers, optimizer_state_dicts):
+            optimizer.load_state_dict(state_dict)
         try:
             with open(
                 os.path.join(self.config.checkpoint_load_folder, MISC_STATE), "rt"
@@ -231,21 +227,18 @@ class PPOLearner(
                 self.cumulative_model_updates = misc_state["cumulative_model_updates"]
         except FileNotFoundError:
             print(
-                f"{self.config.agent_controller_name}: Tried to load the PPO learner's misc state from the file at location {os.path.join(self.config.checkpoint_load_folder, MISC_STATE)}, but there is no such file! Miscellaneous stats will be initialized as if this were a new run instead."
+                f"{self.log_prefix} Tried to load the PPO learner's misc state from the file at location {os.path.join(self.config.checkpoint_load_folder, MISC_STATE)}, but there is no such file! Miscellaneous stats will be initialized as if this were a new run instead."
             )
             self.cumulative_model_updates = 0
 
     def save_checkpoint(self, folder_path: str | os.PathLike[str]) -> None:
         os.makedirs(folder_path, exist_ok=True)
-        torch.save(self.actor.state_dict(), os.path.join(folder_path, ACTOR_FILE))
-        torch.save(self.critic.state_dict(), os.path.join(folder_path, CRITIC_FILE))
         torch.save(
-            self.actor_optimizer.state_dict(),
-            os.path.join(folder_path, ACTOR_OPTIMIZER_FILE),
+            self.actor_critic.state_dict(), os.path.join(folder_path, ACTOR_CRITIC_FILE)
         )
         torch.save(
-            self.critic_optimizer.state_dict(),
-            os.path.join(folder_path, CRITIC_OPTIMIZER_FILE),
+            [optimizer.state_dict() for optimizer in self.optimizers],
+            os.path.join(folder_path, OPTIMIZERS_FILE),
         )
         with open(os.path.join(folder_path, MISC_STATE), "wt") as f:
             json.dump(
@@ -278,8 +271,8 @@ class PPOLearner(
         val_losses: list[torch.Tensor] = []
 
         # Save parameters before computing any updates.
-        actor_before = torch.nn.utils.parameters_to_vector(self.actor.parameters())
-        critic_before = torch.nn.utils.parameters_to_vector(self.critic.parameters())
+        actor_before = self.actor_critic.get_actor_parameter_vector()
+        critic_before = self.actor_critic.get_critic_parameter_vector()
 
         t1 = time.time()
         for _epoch in range(self.config.learner_config.n_epochs):
@@ -292,22 +285,24 @@ class PPOLearner(
                     batch_agent_ids,
                     batch_obs,
                     batch_acts,
-                    batch_old_probs,
-                    batch_values,
-                    batch_advantages,
+                    _batch_old_probs,
+                    _batch_values,
+                    _batch_advantages,
                 ) = batch
-                batch_target_values = batch_values + batch_advantages
-                if self.config.learner_config.advantage_standardization:
-                    old_device = batch_advantages.device
-                    batch_advantages = batch_advantages.to(
-                        self.config.learner_config.device
-                    )
-                    std, mean = torch.std_mean(batch_advantages)
-                    batch_advantages = (batch_advantages - mean) / (std + 1e-8)
-                    batch_advantages = batch_advantages.to(old_device)
 
-                self.actor_optimizer.zero_grad()
-                self.critic_optimizer.zero_grad()
+                _ = self.batch_old_probs.copy_(_batch_old_probs, non_blocking=True)
+                _ = self.batch_target_values.copy_(_batch_values, non_blocking=True)
+                _ = self.batch_advantages.copy_(_batch_advantages, non_blocking=True)
+                _ = self.batch_target_values.add_(self.batch_advantages)
+
+                if self.config.learner_config.advantage_standardization:
+                    std, mean = torch.std_mean(self.batch_advantages)
+                    if torch.isnan(std):
+                        std = torch.tensor(1, dtype=self.config.learner_config.dtype)
+                    _ = self.batch_advantages.sub_(mean).div_(std + 1e-8)
+
+                for optimizer in self.optimizers:
+                    optimizer.zero_grad()
 
                 for minibatch_slice in range(
                     0, self.config.learner_config.batch_size, self.minibatch_size
@@ -318,32 +313,22 @@ class PPOLearner(
                         start + self.minibatch_size,
                         self.config.learner_config.batch_size,
                     )
-                    minibatch_ratio = (
-                        stop - start
-                    ) / self.config.learner_config.batch_size
+                    n = stop - start
+                    minibatch_ratio = n / self.config.learner_config.batch_size
 
                     agent_ids = batch_agent_ids[start:stop]
                     obs = batch_obs[start:stop]
                     acts = batch_acts[start:stop]
-                    advantages = batch_advantages[start:stop].to(
-                        self.config.learner_config.device
-                    )
-                    old_probs = batch_old_probs[start:stop].to(
-                        self.config.learner_config.device
-                    )
-                    target_values = batch_target_values[start:stop].to(
-                        self.config.learner_config.device
-                    )
+                    old_probs = self.batch_old_probs[start:stop]
+                    target_values = self.batch_target_values[start:stop]
+                    advantages = self.batch_advantages[start:stop]
 
-                    # Compute value estimates.
-                    vals = self.critic(agent_ids, obs).view_as(target_values)
-
-                    # Get actor log probs & entropy.
-                    log_probs, entropy = self.actor.get_backprop_data(
+                    log_probs, entropy, vals = self.actor_critic.get_backprop_data(
                         agent_ids, obs, acts
                     )
                     log_probs = log_probs.view_as(old_probs)
                     entropy = entropy * minibatch_ratio
+                    vals = vals.view_as(target_values)
 
                     # Compute PPO loss.
                     ratio = torch.exp(log_probs - old_probs)
@@ -379,8 +364,8 @@ class PPOLearner(
                         actor_loss - entropy * self.config.learner_config.ent_coef
                     )
 
-                    ppo_loss.backward()  # pyright: ignore [reportUnknownMemberType, reportUnusedCallResult]
-                    value_loss.backward()  # pyright: ignore [reportUnknownMemberType, reportUnusedCallResult]
+                    total_loss = ppo_loss + value_loss
+                    total_loss.backward()  # pyright: ignore [reportUnknownMemberType, reportUnusedCallResult]
 
                     val_losses.append(
                         value_loss.to(device="cpu", non_blocking=True).detach()
@@ -390,21 +375,20 @@ class PPOLearner(
                         entropy.to(device="cpu", non_blocking=True).detach()
                     )
 
-                _ = torch.nn.utils.clip_grad_norm_(
-                    self.critic.parameters(), max_norm=0.5
-                )
-                _ = torch.nn.utils.clip_grad_norm_(
-                    self.actor.parameters(), max_norm=0.5
-                )
+                if self.config.learner_config.max_grad_norm is not None:
+                    _ = torch.nn.utils.clip_grad_norm_(
+                        self.actor_critic.parameters(),
+                        max_norm=self.config.learner_config.max_grad_norm,
+                    )
 
-                self.actor_optimizer.step()
-                self.critic_optimizer.step()
+                for optimizer in self.optimizers:
+                    optimizer.step()
 
                 n_batches += 1
 
         # Compute magnitude of updates made to the actor and critic.
-        actor_after = torch.nn.utils.parameters_to_vector(self.actor.parameters())
-        critic_after = torch.nn.utils.parameters_to_vector(self.critic.parameters())
+        actor_after = self.actor_critic.get_actor_parameter_vector()
+        critic_after = self.actor_critic.get_critic_parameter_vector()
         actor_update_magnitude = cast(
             float,
             (actor_before - actor_after).norm().cpu().item(),  # pyright: ignore [reportUnknownMemberType]
@@ -414,8 +398,9 @@ class PPOLearner(
             (critic_before - critic_after).norm().cpu().item(),  # pyright: ignore [reportUnknownMemberType]
         )
 
-        if self.config.learner_config.device.type != "cpu":
-            torch.cuda.current_stream().synchronize()
+        # synchronize to finalize the values sent to cpu without blocking for PPOData
+        if self.config.learner_config.device.type == "cuda":
+            torch.cuda.synchronize(device=self.config.learner_config.device)
 
         tot_clip = sum(
             v.item() * minibatch_ratio for (v, minibatch_ratio) in clip_fractions
@@ -424,8 +409,8 @@ class PPOLearner(
         tot_divergence = sum(v.item() for v in divergences)
         tot_val_loss = sum(v.item() for v in val_losses)
 
-        self.actor_optimizer.zero_grad()
-        self.critic_optimizer.zero_grad()
+        for optimizer in self.optimizers:
+            optimizer.zero_grad()
 
         self.cumulative_model_updates += n_batches
 

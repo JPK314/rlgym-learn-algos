@@ -1,26 +1,34 @@
-from typing import Generic
+from typing import Generic, TypedDict
 
-from numpy import dtype, float32, float64, ndarray
+from numpy import ndarray
 from rlgym.api import ActionType, AgentID, ObsType, RewardType
 from torch import Tensor
-from typing_extensions import Self
 
 from ...ppo import Trajectory
+from ...ppo.trajectory_processor import (
+    DerivedTrajectoryProcessorConfig,
+    TrajectoryProcessorConfig,
+)
 from ...stateful_functions import BatchRewardTypeNumpyConverter
 
-class DerivedGAETrajectoryProcessorConfig:
-    def __new__(cls, gamma: float, lmbda: float, dtype: dtype) -> Self: ...
+class WelfordRunningStatsStateDict(TypedDict):
+    mean: float
+    count: int
+    m2: float
 
 class GAETrajectoryProcessor(Generic[AgentID, ObsType, ActionType, RewardType]):
     def __new__(
         cls,
         batch_reward_type_numpy_converter: BatchRewardTypeNumpyConverter[RewardType],
     ) -> GAETrajectoryProcessor[AgentID, ObsType, ActionType, RewardType]: ...
-    def load(self, config: DerivedGAETrajectoryProcessorConfig) -> None: ...
+    def load(
+        self,
+        config: DerivedTrajectoryProcessorConfig[TrajectoryProcessorConfig],
+    ) -> None: ...
+    def load_state_dict(self, state_dict: WelfordRunningStatsStateDict) -> None: ...
     def process_trajectories(
         self,
         trajectories: list[Trajectory[AgentID, ObsType, ActionType, RewardType]],
-        return_std: float32 | float64,
     ) -> tuple[
         list[AgentID],
         list[ObsType],
@@ -32,3 +40,4 @@ class GAETrajectoryProcessor(Generic[AgentID, ObsType, ActionType, RewardType]):
         float,
         float,
     ]: ...
+    def state_dict(self) -> WelfordRunningStatsStateDict | None: ...

@@ -1,5 +1,6 @@
 import json
 import os
+import random
 from typing import cast
 
 import numpy as np
@@ -43,11 +44,10 @@ class GAETrajectoryProcessorPurePython(
         """
         :param batch_reward_type_numpy_converter: Instance of BatchRewardTypeNumpyConverter to use.
         """
-        self.return_stats: WelfordRunningStat = WelfordRunningStat((1,))
+        self.return_running_stats: WelfordRunningStat = WelfordRunningStat((1,))
         self.config: (
             DerivedTrajectoryProcessorConfig[GAETrajectoryProcessorConfigModel] | None
         ) = None
-        self.return_stats = WelfordRunningStat((1,))
         self.batch_reward_type_numpy_converter: BatchRewardTypeNumpyConverter[
             RewardType
         ] = (
@@ -57,13 +57,11 @@ class GAETrajectoryProcessorPurePython(
         )
         self.gamma: float
         self.lmbda: float
-        self.standardize_returns: bool
-        self.max_returns_per_stats_increment: int
+        self.standardize_rewards: bool
+        self.max_returns_per_stats_increment: int | None
         self.dtype: np.dtype
         self.device: torch.device
         self.checkpoint_load_folder: str | None
-        self.norm_reward_min: np.ndarray
-        self.norm_reward_max: np.ndarray
 
     @property
     @override
@@ -84,9 +82,10 @@ class GAETrajectoryProcessorPurePython(
         ],
         GAETrajectoryProcessorData,
     ]:
-        return_std = (
-            self.return_stats.std.squeeze() if self.standardize_returns else None
+        assert self.config is not None, (
+            "process_trajectories cannot be called before load."
         )
+
         gamma = np.array(self.gamma, dtype=self.dtype)
         lmbda = np.array(self.lmbda, dtype=self.dtype)
         exp_len = 0
@@ -99,7 +98,35 @@ class GAETrajectoryProcessorPurePython(
         advantages_list: list[np.ndarray] = []
         returns_list: list[np.ndarray] = []
         reward_sum = np.array(0, dtype=self.dtype)
-        for trajectory in trajectories:
+
+        trajectories_rewards_arrays = [
+            self.batch_reward_type_numpy_converter.as_numpy(trajectory.reward_list)
+            for trajectory in trajectories
+        ]
+
+        return_std = None
+        if self.config.trajectory_processor_config.standardize_rewards:
+            raw_returns_list: list[np.ndarray] = []
+            for rewards_array in trajectories_rewards_arrays:
+                raw_return = np.array(0, dtype=self.dtype)
+                for reward in reversed(np.nditer(rewards_array)):
+                    raw_return = reward + self.gamma * raw_return
+                    raw_returns_list.append(raw_return)
+            if (
+                self.config.trajectory_processor_config.max_returns_per_stats_increment
+                is not None
+            ):
+                for raw_return in random.sample(
+                    raw_returns_list,
+                    self.config.trajectory_processor_config.max_returns_per_stats_increment,
+                ):
+                    self.return_running_stats.update(raw_return)
+            else:
+                for raw_return in raw_returns_list:
+                    self.return_running_stats.update(raw_return)
+            return_std = self.return_running_stats.std.squeeze()
+
+        for trajectory, rewards_array in zip(trajectories, trajectories_rewards_arrays):
             cur_return = np.array(0, dtype=self.dtype)
             next_val_pred = (
                 cast(torch.Tensor, trajectory.final_val_pred).squeeze().cpu().numpy()
@@ -108,9 +135,6 @@ class GAETrajectoryProcessorPurePython(
             )
 
             cur_advantages = np.array(0, dtype=self.dtype)
-            reward_array = self.batch_reward_type_numpy_converter.as_numpy(
-                trajectory.reward_list
-            )
             value_preds = cast(torch.Tensor, trajectory.val_preds).unbind(0)
             for obs, action, log_prob, reward, value_pred in reversed(
                 list(
@@ -118,7 +142,7 @@ class GAETrajectoryProcessorPurePython(
                         trajectory.obs_list,
                         trajectory.action_list,
                         trajectory.log_probs,
-                        np.nditer(reward_array),
+                        np.nditer(rewards_array),
                         value_preds,
                     )
                 )
@@ -126,14 +150,16 @@ class GAETrajectoryProcessorPurePython(
                 val_pred = value_pred.cpu().numpy()
                 reward_sum += reward
                 if return_std is not None:
-                    norm_reward = np.clip(  # pyright: ignore [ reportUnknownMemberType]
-                        reward / return_std,
-                        a_min=self.norm_reward_min,
-                        a_max=self.norm_reward_max,
-                        dtype=self.dtype,
-                    )
+                    norm_reward = reward / return_std
                 else:
                     norm_reward = reward
+                if self.config.trajectory_processor_config.reward_clip is not None:
+                    norm_reward = np.clip(  # pyright: ignore [ reportUnknownMemberType]
+                        norm_reward,
+                        a_min=-self.config.trajectory_processor_config.reward_clip,
+                        a_max=self.config.trajectory_processor_config.reward_clip,
+                        dtype=self.dtype,
+                    )
                 delta = norm_reward + gamma * next_val_pred - val_pred
                 next_val_pred = val_pred
                 cur_advantages = delta + gamma * lmbda * cur_advantages
@@ -147,23 +173,13 @@ class GAETrajectoryProcessorPurePython(
                 advantages_list.append(cur_advantages)
                 exp_len += 1
 
-        if self.standardize_returns:
-            # Update the running statistics about the returns.
-            n_to_increment = min(self.max_returns_per_stats_increment, exp_len)
-
-            for sample in returns_list[:n_to_increment]:
-                self.return_stats.update(sample)
-            avg_return = self.return_stats.mean[0]
-            return_std = self.return_stats.std[0]
-        else:
-            avg_return = np.nan
-            return_std = np.nan
-        avg_reward = reward_sum.item() / exp_len
+        returns_array = np.array(returns_list)
         average_episode_return = reward_sum.item() / len(trajectories)
+        avg_reward = reward_sum.item() / exp_len
         trajectory_processor_data = GAETrajectoryProcessorData(
             average_undiscounted_episodic_return=average_episode_return,
-            average_return=avg_return,
-            return_standard_deviation=return_std,
+            average_return=returns_array.mean(),
+            return_standard_deviation=returns_array.std(),
             average_reward=avg_reward,
         )
         return (
@@ -183,10 +199,11 @@ class GAETrajectoryProcessorPurePython(
         self,
         config: DerivedTrajectoryProcessorConfig[GAETrajectoryProcessorConfigModel],
     ):
+        random.seed(config.seed)
         self.gamma = config.trajectory_processor_config.gamma
         self.lmbda = config.trajectory_processor_config.lmbda
-        self.standardize_returns = (
-            config.trajectory_processor_config.standardize_returns
+        self.standardize_rewards = (
+            config.trajectory_processor_config.standardize_rewards
         )
         self.max_returns_per_stats_increment = (
             config.trajectory_processor_config.max_returns_per_stats_increment
@@ -196,8 +213,6 @@ class GAETrajectoryProcessorPurePython(
         self.checkpoint_load_folder = config.checkpoint_load_folder
         if self.checkpoint_load_folder is not None:
             self._load_from_checkpoint()
-        self.norm_reward_min = np.array(-10, dtype=self.dtype)
-        self.norm_reward_max = np.array(10, dtype=self.dtype)
         self.batch_reward_type_numpy_converter.set_dtype(self.dtype)
 
     def _load_from_checkpoint(self):
@@ -209,12 +224,12 @@ class GAETrajectoryProcessorPurePython(
             "rt",
         ) as f:
             state = json.load(f)
-        self.return_stats.load_state_dict(state["return_running_stats"])
+        self.return_running_stats.load_state_dict(state["return_running_stats"])
 
     @override
     def save_checkpoint(self, folder_path: str | os.PathLike[str]):
         state = {
-            "return_running_stats": self.return_stats.state_dict(),
+            "return_running_stats": self.return_running_stats.state_dict(),
         }
         with open(
             os.path.join(folder_path, TRAJECTORY_PROCESSOR_FILE),

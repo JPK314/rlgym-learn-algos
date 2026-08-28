@@ -8,22 +8,22 @@ from torch import Tensor
 @dataclass
 class Trajectory(Generic[AgentID, ObsType, ActionType, RewardType]):
     __slots__ = (  # pyright: ignore [reportUnannotatedClassAttribute]
-        "agent_id",
-        "obs_list",
         "action_list",
-        "log_probs",
-        "reward_list",
-        "val_preds",
+        "agent_id",
         "final_obs",
         "final_val_pred",
+        "log_probs",
+        "obs_list",
+        "reward_list",
         "truncated",
+        "val_preds",
     )
     agent_id: AgentID
     obs_list: list[ObsType]
     action_list: list[ActionType]
     log_probs: Tensor
     reward_list: list[RewardType]
-    val_preds: Tensor | None
+    val_preds: Tensor | None  # must be on cpu
     final_obs: ObsType | None
-    final_val_pred: Tensor | None
+    final_val_pred: Tensor | None  # must be on cpu
     truncated: bool

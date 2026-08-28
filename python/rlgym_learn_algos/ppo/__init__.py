@@ -1,5 +1,6 @@
 __all__ = [
     "Actor",
+    "ActorCritic",
     "BasicCritic",
     "ContinuousActor",
     "Critic",
@@ -12,7 +13,6 @@ __all__ = [
     "GAETrajectoryProcessorConfigModel",
     "GAETrajectoryProcessorData",
     "GAETrajectoryProcessorPurePython",
-    "MultiDiscreteFF",
     "NumpyExperienceBuffer",
     "PPOAgentController",
     "PPOAgentControllerConfigModel",
@@ -21,24 +21,27 @@ __all__ = [
     "PPOLearner",
     "PPOLearnerConfigModel",
     "PPOMetricsLogger",
-    "RustDerivedGAETrajectoryProcessorConfig",
     "RustGAETrajectoryProcessor",
+    "SeparateActorCritic",
     "Trajectory",
     "TrajectoryProcessor",
     "TrajectoryProcessorData",
+    "log_actor_critic_parameter_counts",
 ]
 
 from .._rlgym_learn_algos.ppo import (
-    DerivedGAETrajectoryProcessorConfig as RustDerivedGAETrajectoryProcessorConfig,
-)
-from .._rlgym_learn_algos.ppo import (
     GAETrajectoryProcessor as RustGAETrajectoryProcessor,
 )
-from .actor import Actor
-from .basic_critic import BasicCritic
-from .continuous_actor import ContinuousActor
-from .critic import Critic
-from .discrete_actor import DiscreteFF
+from .actor_critic import (
+    Actor,
+    ActorCritic,
+    BasicCritic,
+    ContinuousActor,
+    Critic,
+    DiscreteFF,
+    SeparateActorCritic,
+    log_actor_critic_parameter_counts,
+)
 from .experience_buffer import (
     DerivedExperienceBufferConfig,
     ExperienceBuffer,
@@ -51,7 +54,6 @@ from .gae_trajectory_processor import (
     GAETrajectoryProcessorData,
 )
 from .gae_trajectory_processor_pure_python import GAETrajectoryProcessorPurePython
-from .multi_discrete_actor import MultiDiscreteFF
 from .ppo_agent_controller import (
     PPOAgentController,
     PPOAgentControllerConfigModel,

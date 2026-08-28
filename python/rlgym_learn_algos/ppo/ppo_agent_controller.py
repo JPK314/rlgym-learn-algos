@@ -12,7 +12,7 @@ from typing import Any, Generic, TypedDict, cast
 
 import numpy as np
 import torch
-from pydantic import BaseModel, Field, ValidationInfo, model_validator
+from pydantic import BaseModel, Field, JsonValue, ValidationInfo, model_validator
 from rlgym.api import (
     ActionSpaceType,
     ActionType,
@@ -24,7 +24,6 @@ from rlgym.api import (
 )
 from rlgym_learn import EnvAction, EnvActionType, EnvCloseReason, Timestep
 from rlgym_learn.api import AgentController, DerivedAgentControllerConfig
-from torch import device as _device
 from typing_extensions import override
 
 from rlgym_learn_algos.agent_controller.multi_agent import (
@@ -39,8 +38,7 @@ from ..logging import (
 )
 from ..stateful_functions import ObsStandardizer
 from ..util import flatten_env_obs_data_dict, unflatten_iterable
-from .actor import Actor
-from .critic import Critic
+from .actor_critic import ActorCritic
 from .env_trajectories import EnvTrajectories
 from .experience_buffer import (
     DerivedExperienceBufferConfig,
@@ -196,11 +194,18 @@ class PPOAgentController(
 ):
     def __init__(
         self,
-        actor_factory: Callable[
-            [ObsSpaceType, ActionSpaceType, _device],
-            Actor[AgentID, ObsType, ActionType],
+        actor_critic_factory: Callable[
+            [ObsSpaceType, ActionSpaceType, torch.dtype, torch.device, str | None],
+            ActorCritic[AgentID, ObsType, ActionType],
         ],
-        critic_factory: Callable[[ObsSpaceType, _device], Critic[AgentID, ObsType]],
+        optimizers_factory: Callable[
+            [
+                ActorCritic[AgentID, ObsType, ActionType],
+                dict[str, dict[str, JsonValue]],
+                str | None,
+            ],
+            list[torch.optim.Optimizer],
+        ],
         experience_buffer: ExperienceBuffer[
             TrajectoryProcessorConfig,
             AgentID,
@@ -235,7 +240,7 @@ class PPOAgentController(
             ObsSpaceType,
             ActionSpaceType,
             TrajectoryProcessorData,
-        ] = PPOLearner(actor_factory, critic_factory)
+        ] = PPOLearner(actor_critic_factory, optimizers_factory)
         self.experience_buffer: ExperienceBuffer[
             TrajectoryProcessorConfig,
             AgentID,
@@ -391,8 +396,11 @@ class PPOAgentController(
         ],
     ):
         self.config = config
-        assert not self.config.process_config.recalculate_agent_id_every_step, (
+        assert not config.process_config.recalculate_agent_id_every_step, (
             f"{self.config.subcontroller_name}: PPO Agent Controller cannot handle agent ids being recalculated every step!"
+        )
+        assert not config.subcontroller_mode or self.obs_standardizer is None, (
+            f"{self.config.subcontroller_name}: PPO Agent Controller cannot operate in subcontroller mode with an obs standardizer due to obs standardization modifying Timestep objects in place!"
         )
         print(
             f"{self.config.subcontroller_name}: Using device {config.subcontroller_config.learner_config.device}"
@@ -469,14 +477,13 @@ class PPOAgentController(
                 agent_controller_name=self.config.subcontroller_name,
                 seed=config.base_config.random_seed,
                 dtype=agent_controller_config.learner_config.dtype,
-                learner_device=agent_controller_config.learner_config.device,
                 checkpoint_load_folder=experience_buffer_checkpoint_load_folder,
             )
         )
         if self.metrics_logger is not None:
             self.metrics_logger.load(
                 DerivedMetricsLoggerConfig(
-                    controller_name=config.subcontroller_name,
+                    agent_controller_name=config.subcontroller_name,
                     derived_agent_controller_config=config.to_agent_controller_config(),
                     metrics_logger_config=self.config.subcontroller_config.metrics_logger_config,
                     checkpoint_load_folder=metrics_logger_checkpoint_load_folder,
@@ -631,7 +638,9 @@ class PPOAgentController(
             env_obs_data_dict
         )
 
-        actions, log_probs = self.learner.actor.get_action(agent_id_list, obs_list)
+        actions, log_probs = self.learner.actor_critic.get_actions(
+            agent_id_list, obs_list
+        )
 
         if log_probs.dim() == 0:
             # This can happen if the input is a single element
@@ -725,7 +734,10 @@ class PPOAgentController(
         ) in timestep_data.items():
             if self.obs_standardizer is not None:
                 self._standardize_timestep_observations(env_timesteps)
-            if env_timesteps:
+            if env_timesteps and (
+                not self.config.subcontroller_mode
+                or env_id in self.current_env_controlled_agent_ids
+            ):
                 if env_id not in self.current_env_trajectories:
                     self.current_env_trajectories[env_id] = EnvTrajectories(
                         [timestep.agent_id for timestep in env_timesteps]
@@ -763,9 +775,10 @@ class PPOAgentController(
                 pass
             elif enum_type == EnvActionType.RESET:
                 _ = self.current_env_controlled_agent_ids.pop(env_id, None)
-                env_trajectories = self.current_env_trajectories.pop(env_id)
-                env_trajectories.finalize()
-                self.iteration_trajectories += env_trajectories.get_trajectories()
+                env_trajectories = self.current_env_trajectories.pop(env_id, None)
+                if env_trajectories is not None:
+                    env_trajectories.finalize()
+                    self.iteration_trajectories += env_trajectories.get_trajectories()
             elif enum_type == EnvActionType.SET_STATE:
                 # Can get the desired_state using env_action.desired_state and the prev_timestep_id_dict using env_action.prev_timestep_id_dict, but I'll leave that to you
                 raise NotImplementedError
@@ -827,17 +840,24 @@ class PPOAgentController(
             traj_timestep_idx_ranges.append((start, stop))
             start = stop
 
-        val_preds: torch.Tensor = (
-            self.learner.critic(critic_agent_id_input, critic_obs_input)
-            .flatten()
-            .to(device="cpu", non_blocking=True)
+        val_preds_on_learner_device = self.learner.actor_critic.get_value_predictions(
+            critic_agent_id_input, critic_obs_input
+        ).flatten()
+        # val preds must be on cpu with learner dtype
+        val_preds: torch.Tensor = val_preds_on_learner_device.to(
+            device="cpu", non_blocking=True
         )
-        torch.cuda.empty_cache()
+        assert (
+            val_preds.dtype == self.config.subcontroller_config.learner_config.dtype
+        ), (
+            f"ActorCritic implementation returned dtype {val_preds.dtype} for get_value_predictions instead of the expected {self.config.subcontroller_config.learner_config.dtype}"
+        )
         for idx, (start, stop) in enumerate(traj_timestep_idx_ranges):
             self.iteration_trajectories[idx].val_preds = val_preds[start : stop - 1]
             self.iteration_trajectories[idx].final_val_pred = val_preds[stop - 1]
-        if self.config.subcontroller_config.learner_config.device.type != "cpu":
-            torch.cuda.current_stream().synchronize()
+
+        if val_preds_on_learner_device.device.type == "cuda":
+            torch.cuda.current_stream(val_preds_on_learner_device.device).synchronize()
 
     @override
     def handle_env_closes(self, env_close_reason_dict: dict[int, EnvCloseReason]):

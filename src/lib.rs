@@ -4,6 +4,7 @@ mod agent_controller;
 mod common;
 mod misc;
 mod ppo;
+mod util;
 
 pub use agent_controller::{EnvActionResponse, EnvActionResponseType, MultiAgentController};
 pub use common::{flatten_env_obs_data_dict, unflatten_iterable, unflatten_tensor};
@@ -13,7 +14,6 @@ pub use ppo::gae_trajectory_processor::{
 
 fn ppo<'py>(py: Python<'py>, parent: &Bound<PyModule>) -> PyResult<()> {
     let sub = PyModule::new(py, "ppo")?;
-    sub.add_class::<DerivedGAETrajectoryProcessorConfig>()?;
     sub.add_class::<GAETrajectoryProcessor>()?;
     parent.add_submodule(&sub)?;
     py.import("sys")?
@@ -40,7 +40,6 @@ fn agent_controller<'py>(py: Python<'py>, parent: &Bound<PyModule>) -> PyResult<
     let sub = PyModule::new(py, "agent_controller")?;
     sub.add_class::<EnvActionResponse>()?;
     sub.add_class::<EnvActionResponseType>()?;
-    // TODO: add type stubs for MultiAgentController and fix method signatures in MultiAgentController and MultiAgentSubcontroller
     sub.add_class::<MultiAgentController>()?;
     parent.add_submodule(&sub)?;
     py.import("sys")?.getattr("modules")?.set_item(
