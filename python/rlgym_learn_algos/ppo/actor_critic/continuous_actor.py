@@ -203,7 +203,9 @@ class ContinuousActor(Actor[AgentID, np.ndarray, np.ndarray]):
     def get_output(
         self, obs_list: Sequence[np.ndarray]
     ) -> tuple[torch.Tensor, torch.Tensor]:
-        obs = torch.as_tensor(np.array(obs_list), dtype=self.dtype, device=self.device)
+        obs = torch.as_tensor(
+            np.asarray(obs_list), dtype=self.dtype, device=self.device
+        )
         trunk_output = self.trunk(obs)
         return self.mean_head(trunk_output), self.std_head(trunk_output)
 
@@ -245,7 +247,7 @@ class ContinuousActor(Actor[AgentID, np.ndarray, np.ndarray]):
     ):
         mean, std = self.get_output(obs_list)
 
-        actions_tensor = torch.as_tensor(np.array(action_list), device=self.device)
+        actions_tensor = torch.as_tensor(np.asarray(action_list), device=self.device)
 
         log_probs = self.logpdf(mean, std, action=actions_tensor)
         # No analytical form for entropy, just approximate by sampling from distribution. Not using actions_tensor because that may not be in distribution anymore

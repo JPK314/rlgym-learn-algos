@@ -52,7 +52,9 @@ class DiscreteFF(Actor[AgentID, np.ndarray, np.ndarray]):
         self.n_actions: int = n_actions
 
     def get_output(self, obs_list: Sequence[np.ndarray]) -> torch.Tensor:
-        obs = torch.as_tensor(np.array(obs_list), dtype=self.dtype, device=self.device)
+        obs = torch.as_tensor(
+            np.asarray(obs_list), dtype=self.dtype, device=self.device
+        )
         probs = self.model(obs)
         probs = torch.clamp(probs, min=1e-11, max=1)
         return probs
@@ -85,7 +87,7 @@ class DiscreteFF(Actor[AgentID, np.ndarray, np.ndarray]):
         **kwargs: dict[str, Any],
     ):
         probs = self.get_output(obs_list)
-        actions_tensor = torch.as_tensor(np.array(action_list), device=self.device)
+        actions_tensor = torch.as_tensor(np.asarray(action_list), device=self.device)
         logits = probs_to_logits(probs)
         min_real = torch.finfo(logits.dtype).min
         logits = torch.clamp(logits, min=min_real)
