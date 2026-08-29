@@ -14,13 +14,13 @@ class Actor(ABC, nn.Module, Generic[AgentID, ObsType, ActionType]):
     def get_actions(
         self,
         agent_id_list: list[AgentID],
-        obs_list: list[ObsType],
+        obs_list: list[ObsType] | Tensor,
         **kwargs: dict[str, Any],
     ) -> tuple[Iterable[ActionType], Tensor]:
         """
         Function to get actions and the log of their probabilities from the policy given observations.
         :param agent_id_list: List of AgentIDs for which to produce actions. AgentIDs may not be unique here. Parallel with obs_list.
-        :param obs_list: List of ObsTypes for which to produce actions. Parallel with agent_id_list.
+        :param obs_list: List of ObsTypes for which to produce actions, parallel with agent_id_list, or an equivalent tensor.
         :return: Tuple of (Iterable of chosen actions, Tensor with shape (n,) of log probs (float32) with the action list and the first (only) dimension of the tensor parallel with obs_list).
         """
 
@@ -28,14 +28,14 @@ class Actor(ABC, nn.Module, Generic[AgentID, ObsType, ActionType]):
     def get_backprop_data(
         self,
         agent_id_list: Sequence[AgentID],
-        obs_list: Sequence[ObsType],
-        action_list: Sequence[ActionType],
+        obs_list: Sequence[ObsType] | Tensor,
+        action_list: Sequence[ActionType] | Tensor,
         **kwargs: dict[str, Any],
     ) -> tuple[Tensor, Tensor]:
         """
         Function to compute the data necessary for backpropagation.
         :param agent_id_list: list of agent ids, parallel with obs_list.
-        :param obs_list: list of ObsTypes to pass through the policy
-        :param action_list: Actions taken by the policy, parallel with obs_list
+        :param obs_list: list of ObsTypes to pass through the policy, or an equivalent tensor.
+        :param action_list: Actions taken by the policy, parallel with obs_list, or an equivalent tensor.
         :return: Tuple of (Action log probs tensor with first dimension parallel with action_list, mean entropy as 0-dimensional tensor).
         """

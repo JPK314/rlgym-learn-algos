@@ -109,7 +109,7 @@ class EnvTrajectories(Generic[AgentID, ObsType, ActionType, RewardType]):
         """
         :return: List of trajectories relevant to this env
         """
-        log_probs = torch.tensor(np.array(self.log_probs_list))
+        log_probs = torch.tensor(np.asarray(self.log_probs_list))
         trajectories: list[Trajectory[AgentID, ObsType, ActionType, RewardType]] = []
         for agent_id, idx in self.used_agent_id_idx_map.items():
             obs_list = self.obs_lists[agent_id]

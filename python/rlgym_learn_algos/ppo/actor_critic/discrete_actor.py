@@ -51,10 +51,13 @@ class DiscreteFF(Actor[AgentID, np.ndarray, np.ndarray]):
 
         self.n_actions: int = n_actions
 
-    def get_output(self, obs_list: Sequence[np.ndarray]) -> torch.Tensor:
-        obs = torch.as_tensor(
-            np.asarray(obs_list), dtype=self.dtype, device=self.device
-        )
+    def get_output(self, obs_list: Sequence[np.ndarray] | torch.Tensor) -> torch.Tensor:
+        if isinstance(obs_list, torch.Tensor):
+            obs = obs_list
+        else:
+            obs = torch.as_tensor(
+                np.asarray(obs_list), dtype=self.dtype, device=self.device
+            )
         probs = self.model(obs)
         probs = torch.clamp(probs, min=1e-11, max=1)
         return probs
@@ -63,7 +66,7 @@ class DiscreteFF(Actor[AgentID, np.ndarray, np.ndarray]):
     def get_actions(
         self,
         agent_id_list: Sequence[AgentID],
-        obs_list: Sequence[np.ndarray],
+        obs_list: Sequence[np.ndarray] | torch.Tensor,
         **kwargs: dict[str, Any],
     ) -> tuple[Iterable[np.ndarray], torch.Tensor]:
         probs = self.get_output(obs_list)
@@ -82,12 +85,18 @@ class DiscreteFF(Actor[AgentID, np.ndarray, np.ndarray]):
     def get_backprop_data(
         self,
         agent_id_list: Sequence[AgentID],
-        obs_list: Sequence[np.ndarray],
-        action_list: Sequence[np.ndarray],
+        obs_list: Sequence[np.ndarray] | torch.Tensor,
+        action_list: Sequence[np.ndarray] | torch.Tensor,
         **kwargs: dict[str, Any],
     ):
         probs = self.get_output(obs_list)
-        actions_tensor = torch.as_tensor(np.asarray(action_list), device=self.device)
+
+        if isinstance(action_list, torch.Tensor):
+            actions_tensor = action_list
+        else:
+            actions_tensor = torch.as_tensor(
+                np.asarray(action_list), device=self.device
+            )
         logits = probs_to_logits(probs)
         min_real = torch.finfo(logits.dtype).min
         logits = torch.clamp(logits, min=min_real)

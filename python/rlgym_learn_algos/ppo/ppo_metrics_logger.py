@@ -12,7 +12,7 @@ from rlgym.api import (
 )
 from typing_extensions import override
 
-from ..logging import DerivedMetricsLoggerConfig, DictMetricsLogger, MetricsLoggerConfig
+from ..logging import DerivedMetricsLoggerConfig, DictMetricsLogger
 from .gae_trajectory_processor import GAETrajectoryProcessorData
 from .ppo_agent_controller import PPOAgentControllerConfigModel, PPOAgentControllerData
 from .trajectory_processor import TrajectoryProcessorConfig
@@ -20,7 +20,7 @@ from .trajectory_processor import TrajectoryProcessorConfig
 
 class PPOMetricsLogger(
     DictMetricsLogger[
-        PPOAgentControllerConfigModel[TrajectoryProcessorConfig, MetricsLoggerConfig],
+        PPOAgentControllerConfigModel[TrajectoryProcessorConfig, Any],
         None,
         AgentID,
         ObsType,
@@ -33,7 +33,6 @@ class PPOMetricsLogger(
     ],
     Generic[
         TrajectoryProcessorConfig,
-        MetricsLoggerConfig,
         AgentID,
         ObsType,
         ActionType,
@@ -105,7 +104,7 @@ class PPOMetricsLogger(
         config: DerivedMetricsLoggerConfig[
             PPOAgentControllerConfigModel[
                 TrajectoryProcessorConfig,
-                MetricsLoggerConfig,
+                None,
             ],
             None,
             AgentID,

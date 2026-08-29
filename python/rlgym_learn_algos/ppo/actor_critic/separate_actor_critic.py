@@ -27,14 +27,14 @@ class SeparateActorCritic(
     def get_actions(
         self,
         agent_id_list: list[AgentID],
-        obs_list: list[ObsType],
+        obs_list: list[ObsType] | Tensor,
         **kwargs: dict[str, Any],
     ) -> tuple[Iterable[ActionType], Tensor]:
         return self.actor.get_actions(agent_id_list, obs_list, **kwargs)
 
     @override
     def get_value_predictions(
-        self, agent_id_list: list[AgentID], obs_list: list[ObsType]
+        self, agent_id_list: list[AgentID], obs_list: list[ObsType] | Tensor
     ):
         return self.critic(agent_id_list, obs_list)
 
@@ -42,8 +42,8 @@ class SeparateActorCritic(
     def get_backprop_data(
         self,
         agent_id_list: Sequence[AgentID],
-        obs_list: Sequence[ObsType],
-        action_list: Sequence[ActionType],
+        obs_list: Sequence[ObsType] | Tensor,
+        action_list: Sequence[ActionType] | Tensor,
         **kwargs: dict[str, Any],
     ) -> tuple[Tensor, Tensor, Tensor]:
         (log_probs, entropy) = self.actor.get_backprop_data(

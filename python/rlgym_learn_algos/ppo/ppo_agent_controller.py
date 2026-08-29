@@ -212,6 +212,8 @@ class PPOAgentController(
             ObsType,
             ActionType,
             RewardType,
+            ObsSpaceType,
+            ActionSpaceType,
             TrajectoryProcessorData,
         ],
         metrics_logger: MetricsLogger[
@@ -247,6 +249,8 @@ class PPOAgentController(
             ObsType,
             ActionType,
             RewardType,
+            ObsSpaceType,
+            ActionSpaceType,
             TrajectoryProcessorData,
         ] = experience_buffer
         self.metrics_logger: (
@@ -475,6 +479,8 @@ class PPOAgentController(
             DerivedExperienceBufferConfig(
                 experience_buffer_config=experience_buffer_config,
                 agent_controller_name=self.config.subcontroller_name,
+                obs_space=self.obs_space,
+                action_space=self.action_space,
                 seed=config.base_config.random_seed,
                 dtype=agent_controller_config.learner_config.dtype,
                 checkpoint_load_folder=experience_buffer_checkpoint_load_folder,

@@ -19,6 +19,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A new abstraction `ActorCritic` has been created that combines the functionality of `Actor` and `Critic` to allow for shared parameters between the two. The `SeparateActorCritic` implementation wraps `Actor` and `Critic` instances into an `ActorCritic` instance.
 - Added new config field `max_grad_norm` to `PPOLearnerConfigModel` which is used to clip the gradient norm when updating the actor and critic.
 - Added new config parameter `reward_clip` instead of hard-coding a clip range of -10 to 10 for rewards during standardization. This parameter can be used independently of
+- `obs_space` and `action_space` have been added to `DerivedExperienceBufferConfig`.
+- Added `NumpyCircularBuffer` and `TensorCircularBuffer` abstractions for experience buffers.
 
 ### Changed
 
@@ -64,8 +66,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - When `standardize_rewards` is true, `max_returns_per_stats_increment` now uses a random sample (without replacement) of the unstandardized, unclipped returns to update the running stat that stores the standard deviation.
   - `standardize_returns` being set to true no longer hard codes a clip on all rewards to `[-10, 10]`. Instead a separate optional field `reward_clip` has been added (see Added section above).
 - `max_returns_per_stats_increment` is now optional, and when set to None, all unstandardized, unclipped returns are used instead of just a random sample. Defaults to None (previously 150).
+- Updated `Actor`, `Critic`, and `ActorCritic` abstract classes and implementations to optionally take a `Tensor` instead of a `list[ObsType]` or `list[ActionType]` where appropriate.
 - `ContinuousActor` has been reworked entirely. It now uses tanh squishing and an affine transform to allow for arbitrary finite ranges in each output dimension, and no longer restricts the variance of the gaussian.
 - The inner metrics logger checkpoint for `WandbMetricsLogger` is now saved in a folder `inner_metrics_logger` inside the folder for the `WandbMetricsLogger` checkpoint itself.
+- Switched `ExperienceBuffer` and `NumpyExperienceBuffer` to use `TensorCircularBuffer` and `NumpyCircularBuffer` where appropriate.
 
 ### Removed
 

@@ -131,7 +131,6 @@ class GAETrajectoryProcessor(
         if config.checkpoint_load_folder is not None:
             self._load_from_checkpoint()
 
-    # TODO: save/load running stats from rust side
     def _load_from_checkpoint(self):
         assert self.config is not None, (
             "Cannot load from checkpoint before calling load with config!"

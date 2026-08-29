@@ -5,16 +5,20 @@ import pickle
 import zipfile
 from collections.abc import Generator, Sequence
 from io import BytesIO
-from typing import Any, cast
+from typing import Any
 
 import numpy as np
 import torch
 from numpy.typing import NDArray
-from rlgym.api import AgentID, RewardType
+from rlgym.api import ActionSpaceType, AgentID, ObsSpaceType, RewardType
 from typing_extensions import override
 
-from ..util.torch_wrappers import TensorCircularBuffer
-from .experience_buffer import EXPERIENCE_BUFFER_FILE, ExperienceBuffer
+from ..util.circular_buffers import NumpyCircularBuffer, TensorCircularBuffer
+from .experience_buffer import (
+    EXPERIENCE_BUFFER_FILE,
+    DerivedExperienceBufferConfig,
+    ExperienceBuffer,
+)
 from .trajectory import Trajectory
 from .trajectory_processor import (
     TrajectoryProcessor,
@@ -30,42 +34,11 @@ class NumpyExperienceBuffer(
         np.ndarray,
         np.ndarray,
         RewardType,
+        ObsSpaceType,
+        ActionSpaceType,
         TrajectoryProcessorData,
     ],
 ):
-    @staticmethod
-    def _cat_numpy(t1: np.ndarray | None, t2: np.ndarray, size: int):
-        t2_len = len(t2)
-        if t1 is None:
-            if t2_len > size:
-                t = cast(np.ndarray, t2[-size:].copy())
-            else:
-                t = t2
-            del t1
-            del t2
-            return t
-
-        if t2_len > size:
-            # t2 alone is larger than we want; copy the end
-            # This copy is needed to avoid nesting views
-            t = cast(np.ndarray, t2[-size:].copy())
-
-        elif t2_len == size:
-            # t2 is a perfect match; just use it directly
-            t = t2
-
-        elif len(t1) + t2_len > size:
-            # t1+t2 is larger than we want; use t2 wholly with the end of t1 before it
-            t = np.concatenate((t1[t2_len - size :], t2), 0)
-
-        else:
-            # t1+t2 does not exceed what we want; concatenate directly
-            t = np.concatenate((t1, t2), 0)
-
-        del t1
-        del t2
-        return t
-
     def __init__(
         self,
         trajectory_processor: TrajectoryProcessor[
@@ -86,11 +59,26 @@ class NumpyExperienceBuffer(
             TrajectoryProcessorData,
         ] = trajectory_processor
         self.agent_ids: list[AgentID] = []
-        self.observations: np.ndarray | None = None
-        self.actions: np.ndarray | None = None
+        self.observations: NumpyCircularBuffer
+        self.actions: NumpyCircularBuffer
         self.log_probs: TensorCircularBuffer
         self.values: TensorCircularBuffer
         self.advantages: TensorCircularBuffer
+
+    @override
+    def load(
+        self,
+        config: DerivedExperienceBufferConfig[
+            TrajectoryProcessorConfig, ObsSpaceType, ActionSpaceType
+        ],
+    ):
+        super().load(config)
+        self.observations = NumpyCircularBuffer(
+            capacity=self.max_size,
+        )
+        self.actions = NumpyCircularBuffer(
+            capacity=self.max_size,
+        )
 
     @override
     def _load_from_checkpoint(self):
@@ -104,9 +92,11 @@ class NumpyExperienceBuffer(
                 ),
                 "r",
             ) as z:
-                self.agent_ids = self._load_list_from_pkl(z, "agent_ids.pkl")
-                self.observations = self._load_numpy_from_npy(z, "observations.npy")
-                self.actions = self._load_numpy_from_npy(z, "actions.npy")
+                self.agent_ids = self._load_list_from_zip(z, "agent_ids.pkl")
+                self.observations = self._load_numpy_buffer_from_zip(
+                    z, "observations.npy"
+                )
+                self.actions = self._load_numpy_buffer_from_zip(z, "actions.npy")
                 self.log_probs = self._load_tensor_buffer_from_zip(z, "log_probs.pt")
                 self.values = self._load_tensor_buffer_from_zip(z, "values.pt")
                 self.advantages = self._load_tensor_buffer_from_zip(z, "advantages.pt")
@@ -115,23 +105,32 @@ class NumpyExperienceBuffer(
                 f"{self.config.agent_controller_name}: Tried to load experience buffer from checkpoint using the file at location {os.path.join(self.config.checkpoint_load_folder, EXPERIENCE_BUFFER_FILE)}, but there is no such file! A blank experience buffer will be used instead."
             )
 
-    def _load_numpy_from_npy(self, z: zipfile.ZipFile, filename: str) -> np.ndarray:
-        loaded_data = np.load(BytesIO(z.read(filename)), allow_pickle=False)
-        loaded_len = len(loaded_data)
-        if loaded_len > self.config.experience_buffer_config.max_size:
-            print(
-                f"{self.config.agent_controller_name}: Experience buffer checkpoint length for {filename} was {loaded_len}, but the configured capacity is {self.config.experience_buffer_config.max_size}. The newest samples that fit will be retained."
+    def _load_numpy_buffer_from_zip(
+        self, z: zipfile.ZipFile, filename: str
+    ) -> NumpyCircularBuffer:
+        numpy_buffer = NumpyCircularBuffer(
+            capacity=self.config.experience_buffer_config.max_size,
+        )
+        if filename in z.namelist():
+            loaded_data = np.load(BytesIO(z.read(filename)), allow_pickle=False).astype(
+                self.config.dtype
             )
-            ret_arr = loaded_data[-self.config.experience_buffer_config.max_size :]
-        else:
-            ret_arr = loaded_data
-        return ret_arr
+            numpy_buffer.append(loaded_data)
+        return numpy_buffer
 
     @staticmethod
-    def _save_numpy_to_zip(z: zipfile.ZipFile, filename: str, v: np.ndarray):
-        buf = BytesIO()
-        np.save(buf, v, allow_pickle=False)
-        z.writestr(filename, buf.getvalue())
+    def _save_numpy_buffer_to_zip(
+        z: zipfile.ZipFile, filename: str, v: NumpyCircularBuffer
+    ):
+        arr = v.array()
+        if arr is not None:
+            buf = BytesIO()
+            np.save(
+                buf,
+                arr,
+                allow_pickle=False,
+            )
+            z.writestr(filename, buf.getvalue())
 
     @override
     def save_checkpoint(self, folder_path: str | os.PathLike[str]):
@@ -143,11 +142,11 @@ class NumpyExperienceBuffer(
                 compression=zipfile.ZIP_DEFLATED,
             ) as z:
                 z.writestr("agent_ids.pkl", pickle.dumps(self.agent_ids))
-                NumpyExperienceBuffer._save_numpy_to_zip(
-                    z, "observations.npy", cast(np.ndarray, self.observations)
+                NumpyExperienceBuffer._save_numpy_buffer_to_zip(
+                    z, "observations.npy", self.observations
                 )
-                NumpyExperienceBuffer._save_numpy_to_zip(
-                    z, "actions.npy", cast(np.ndarray, self.actions)
+                NumpyExperienceBuffer._save_numpy_buffer_to_zip(
+                    z, "actions.npy", self.actions
                 )
                 ExperienceBuffer._save_tensor_buffer_to_zip(
                     z, "log_probs.pt", self.log_probs
@@ -164,7 +163,6 @@ class NumpyExperienceBuffer(
         trajectories: list[Trajectory[AgentID, np.ndarray, np.ndarray, RewardType]],
     ) -> TrajectoryProcessorData:
         _cat_list = ExperienceBuffer._cat_list
-        _cat_numpy = NumpyExperienceBuffer._cat_numpy
         exp_buffer_data, trajectory_processor_data = (
             self.trajectory_processor.process_trajectories(trajectories)
         )
@@ -175,16 +173,10 @@ class NumpyExperienceBuffer(
         self.agent_ids = _cat_list(
             self.agent_ids, agent_ids, self.config.experience_buffer_config.max_size
         )
-        self.observations = _cat_numpy(
-            self.observations,
+        self.observations.append(
             np.array(observations),
-            self.config.experience_buffer_config.max_size,
         )
-        self.actions = _cat_numpy(
-            self.actions,
-            np.array(actions),
-            self.config.experience_buffer_config.max_size,
-        )
+        self.actions.append(np.array(actions))
         self.log_probs.append(log_probs)
         self.values.append(values)
         self.advantages.append(advantages)
@@ -202,17 +194,26 @@ class NumpyExperienceBuffer(
         torch.Tensor,
         torch.Tensor,
     ]:
-        assert self.observations is not None and self.actions is not None, (
-            "Can't get samples before any data has been added to the experience buffer!"
-        )
         py_indices: list[int] = indices.tolist()
+        obs_arr = self.observations.array()
+        actions_arr = self.actions.array()
+        log_probs_tensor = self.log_probs.tensor()
+        values_tensor = self.values.tensor()
+        advantages_tensor = self.advantages.tensor()
+        assert (
+            obs_arr is not None
+            and actions_arr is not None
+            and log_probs_tensor is not None
+            and values_tensor is not None
+            and advantages_tensor is not None
+        ), "Cannot get samples of experience buffer before any data has been submitted"
         return (
             [self.agent_ids[index] for index in py_indices],
-            self.observations[indices],
-            self.actions[indices],
-            self.log_probs.tensor()[indices],
-            self.values.tensor()[indices],
-            self.advantages.tensor()[indices],
+            obs_arr[indices],
+            actions_arr[indices],
+            log_probs_tensor[indices],
+            values_tensor[indices],
+            advantages_tensor[indices],
         )
 
     @override
@@ -236,7 +237,7 @@ class NumpyExperienceBuffer(
         :param batch_size: size of each batch yielded by the generator.
         :return:
         """
-        total_samples = self.values.tensor().shape[0]
+        total_samples = len(self.agent_ids)
         indices = self.rng.permutation(total_samples)
         start_idx = 0
         while start_idx + batch_size <= total_samples:
@@ -256,26 +257,24 @@ class NumpyExperienceBuffer(
         del self.values
         del self.advantages
         self.agent_ids = []
-        self.observations = None
-        self.actions = None
+        self.observations = NumpyCircularBuffer(
+            capacity=self.max_size,
+        )
+        self.actions = NumpyCircularBuffer(
+            capacity=self.max_size,
+        )
         self.log_probs = TensorCircularBuffer(
             capacity=self.max_size,
-            shape=(),
-            dtype=self.config.dtype,
             device=self.config.experience_buffer_config.device,
             pin_memory=True,
         )
         self.values = TensorCircularBuffer(
             capacity=self.max_size,
-            shape=(),
-            dtype=self.config.dtype,
             device=self.config.experience_buffer_config.device,
             pin_memory=True,
         )
         self.advantages = TensorCircularBuffer(
             capacity=self.max_size,
-            shape=(),
-            dtype=self.config.dtype,
             device=self.config.experience_buffer_config.device,
             pin_memory=True,
         )

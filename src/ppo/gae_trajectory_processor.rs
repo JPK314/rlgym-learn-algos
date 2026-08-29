@@ -25,10 +25,20 @@ pub struct GAETrajectoryProcessorConfig {
 }
 
 fn extract_torch(torch_dtype: &Bound<'_, PyAny>) -> PyResult<NumpyDtype> {
+    static TORCH_EMPTY: PyOnceLock<Py<PyAny>> = PyOnceLock::new();
+    let py = torch_dtype.py();
     NumpyDtype::extract(
-        torch_dtype
-            .str()?
-            .call_method1("replace", ("torch.", ""))?
+        TORCH_EMPTY
+            .get_or_try_init::<_, PyErr>(py, || Ok(py.import("torch")?.getattr("empty")?.unbind()))?
+            .bind(py)
+            .call(
+                (0,),
+                Some(&PyDict::from_sequence(
+                    &[("dtype", torch_dtype)].into_pyobject(py)?,
+                )?),
+            )?
+            .call_method0("numpy")?
+            .getattr("dtype")?
             .as_borrowed(),
     )
 }
@@ -274,7 +284,7 @@ macro_rules! define_process_trajectories {
                         let mut cur_advantage = 0 as $dtype;
                         log_probs_list.push(trajectory.log_probs);
                         values_list.push(trajectory.val_preds.clone());
-                        // TODO: add assertions for device, contiguity, dtype and check speed cost
+
                         let dtype = trajectory.val_preds.getattr(intern!(py, "dtype"))?;
                         assert!(dtype.eq(torch_dtype)?, "Value predictions must use dtype specified by config ({}), got {}", torch_dtype.repr()?.to_str()?, dtype.repr()?.to_str()?);
                         let device = trajectory.val_preds.getattr(intern!(py, "device"))?.getattr(intern!(py, "type"))?.extract::<String>()?;

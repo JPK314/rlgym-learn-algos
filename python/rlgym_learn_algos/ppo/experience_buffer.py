@@ -10,10 +10,17 @@ import numpy as np
 import torch
 from numpy.typing import NDArray
 from pydantic import BaseModel, Field, ValidationInfo, model_validator
-from rlgym.api import ActionType, AgentID, ObsType, RewardType
+from rlgym.api import (
+    ActionSpaceType,
+    ActionType,
+    AgentID,
+    ObsSpaceType,
+    ObsType,
+    RewardType,
+)
 
+from ..util.circular_buffers import TensorCircularBuffer
 from ..util.torch_pydantic import PydanticTorchDevice
-from ..util.torch_wrappers import TensorCircularBuffer
 from .trajectory import Trajectory
 from .trajectory_processor import (
     DerivedTrajectoryProcessorConfig,
@@ -41,6 +48,8 @@ class ExperienceBufferConfigModel(
         experience_buffer: (
             ExperienceBuffer[
                 TrajectoryProcessorConfig,
+                Any,
+                Any,
                 Any,
                 Any,
                 Any,
@@ -77,9 +86,13 @@ class ExperienceBufferConfigModel(
 
 
 @dataclass
-class DerivedExperienceBufferConfig(Generic[TrajectoryProcessorConfig]):
+class DerivedExperienceBufferConfig(
+    Generic[TrajectoryProcessorConfig, ObsSpaceType, ActionSpaceType]
+):
     experience_buffer_config: ExperienceBufferConfigModel[TrajectoryProcessorConfig]
     agent_controller_name: str
+    obs_space: ObsSpaceType
+    action_space: ActionSpaceType
     seed: int
     dtype: torch.dtype
     checkpoint_load_folder: str | None = None
@@ -92,6 +105,8 @@ class ExperienceBuffer(
         ObsType,
         ActionType,
         RewardType,
+        ObsSpaceType,
+        ActionSpaceType,
         TrajectoryProcessorData,
     ]
 ):
@@ -135,9 +150,16 @@ class ExperienceBuffer(
         self.advantages: TensorCircularBuffer
         self.rng: np.random.RandomState = np.random.RandomState(0)
         self.max_size: int
-        self.config: DerivedExperienceBufferConfig[TrajectoryProcessorConfig]
+        self.config: DerivedExperienceBufferConfig[
+            TrajectoryProcessorConfig, ObsSpaceType, ActionSpaceType
+        ]
 
-    def load(self, config: DerivedExperienceBufferConfig[TrajectoryProcessorConfig]):
+    def load(
+        self,
+        config: DerivedExperienceBufferConfig[
+            TrajectoryProcessorConfig, ObsSpaceType, ActionSpaceType
+        ],
+    ):
         self.config = config
         self.max_size = config.experience_buffer_config.max_size
         self.rng = np.random.RandomState(config.seed)
@@ -152,22 +174,16 @@ class ExperienceBuffer(
         )
         self.log_probs = TensorCircularBuffer(
             capacity=self.max_size,
-            shape=(),
-            dtype=config.dtype,
             device=config.experience_buffer_config.device,
             pin_memory=True,
         )
         self.values = TensorCircularBuffer(
             capacity=self.max_size,
-            shape=(),
-            dtype=config.dtype,
             device=config.experience_buffer_config.device,
             pin_memory=True,
         )
         self.advantages = TensorCircularBuffer(
             capacity=self.max_size,
-            shape=(),
-            dtype=config.dtype,
             device=config.experience_buffer_config.device,
             pin_memory=True,
         )
@@ -185,9 +201,9 @@ class ExperienceBuffer(
                 ),
                 "r",
             ) as z:
-                self.agent_ids = self._load_list_from_pkl(z, "agent_ids.pkl")
-                self.observations = self._load_list_from_pkl(z, "observations.pkl")
-                self.actions = self._load_list_from_pkl(z, "actions.pkl")
+                self.agent_ids = self._load_list_from_zip(z, "agent_ids.pkl")
+                self.observations = self._load_list_from_zip(z, "observations.pkl")
+                self.actions = self._load_list_from_zip(z, "actions.pkl")
                 self.log_probs = self._load_tensor_buffer_from_zip(z, "log_probs.pt")
                 self.values = self._load_tensor_buffer_from_zip(z, "values.pt")
                 self.advantages = self._load_tensor_buffer_from_zip(z, "advantages.pt")
@@ -196,7 +212,7 @@ class ExperienceBuffer(
                 f"{self.config.agent_controller_name}: Tried to load experience buffer from checkpoint using the file at location {os.path.join(self.config.checkpoint_load_folder, EXPERIENCE_BUFFER_FILE)}, but there is no such file! A blank experience buffer will be used instead."
             )
 
-    def _load_list_from_pkl(self, z: zipfile.ZipFile, filename: str) -> list[Any]:
+    def _load_list_from_zip(self, z: zipfile.ZipFile, filename: str) -> list[Any]:
         loaded_data = pickle.loads(z.read(filename))
         loaded_len = len(loaded_data)
         if loaded_len > self.config.experience_buffer_config.max_size:
@@ -213,34 +229,35 @@ class ExperienceBuffer(
         z: zipfile.ZipFile,
         filename: str,
     ) -> TensorCircularBuffer:
-        state = torch.load(
-            BytesIO(z.read(filename)),
-            map_location=self.config.experience_buffer_config.device,
-            weights_only=True,
-        )
-        loaded_data: torch.Tensor = state["data"].to(self.config.dtype)
-        loaded_capacity: int = state["capacity"]
-        if loaded_capacity != self.config.experience_buffer_config.max_size:
-            print(
-                f"{self.config.agent_controller_name}: Experience buffer checkpoint capacity for {filename} was {loaded_capacity}, but the configured capacity is {self.config.experience_buffer_config.max_size}. The newest samples that fit will be retained."
-            )
         tensor_buffer = TensorCircularBuffer(
             capacity=self.config.experience_buffer_config.max_size,
-            shape=tuple(state["data"].shape[1:]),
-            dtype=self.config.dtype,
             device=self.config.experience_buffer_config.device,
             pin_memory=True,
         )
-        tensor_buffer.append(loaded_data)
+        if filename in z.namelist():
+            state = torch.load(
+                BytesIO(z.read(filename)),
+                map_location=self.config.experience_buffer_config.device,
+                weights_only=True,
+            )
+            loaded_data: torch.Tensor = state["data"].to(self.config.dtype)
+            loaded_capacity: int = state["capacity"]
+            if loaded_capacity != self.config.experience_buffer_config.max_size:
+                print(
+                    f"{self.config.agent_controller_name}: Experience buffer checkpoint capacity for {filename} was {loaded_capacity}, but the configured capacity is {self.config.experience_buffer_config.max_size}. The newest samples that fit will be retained."
+                )
+            tensor_buffer.append(loaded_data)
         return tensor_buffer
 
     @staticmethod
     def _save_tensor_buffer_to_zip(
         z: zipfile.ZipFile, filename: str, v: TensorCircularBuffer
     ):
-        buf = BytesIO()
-        torch.save({"capacity": v.capacity, "data": v.tensor().detach().cpu()}, buf)
-        z.writestr(filename, buf.getvalue())
+        t = v.tensor()
+        if t is not None:
+            buf = BytesIO()
+            torch.save({"capacity": v.capacity, "data": t.detach().cpu()}, buf)
+            z.writestr(filename, buf.getvalue())
 
     def save_checkpoint(self, folder_path: str | os.PathLike[str]):
         os.makedirs(folder_path, exist_ok=True)
@@ -305,13 +322,21 @@ class ExperienceBuffer(
         torch.Tensor,
     ]:
         py_indices: list[int] = indices.tolist()
+        log_probs_tensor = self.log_probs.tensor()
+        values_tensor = self.values.tensor()
+        advantages_tensor = self.advantages.tensor()
+        assert (
+            log_probs_tensor is not None
+            and values_tensor is not None
+            and advantages_tensor is not None
+        ), "Cannot get samples of experience buffer before any data has been submitted"
         return (
             [self.agent_ids[index] for index in py_indices],
             [self.observations[index] for index in py_indices],
             [self.actions[index] for index in py_indices],
-            self.log_probs.tensor()[indices],
-            self.values.tensor()[indices],
-            self.advantages.tensor()[indices],
+            log_probs_tensor[indices],
+            values_tensor[indices],
+            advantages_tensor[indices],
         )
 
     def get_all_batches_shuffled(
@@ -334,7 +359,7 @@ class ExperienceBuffer(
         :param batch_size: size of each batch yielded by the generator.
         :return:
         """
-        total_samples = self.values.tensor().shape[0]
+        total_samples = len(self.agent_ids)
         indices = self.rng.permutation(total_samples)
         start_idx = 0
         while start_idx + batch_size <= total_samples:
@@ -357,22 +382,16 @@ class ExperienceBuffer(
         self.actions = []
         self.log_probs = TensorCircularBuffer(
             capacity=self.max_size,
-            shape=(),
-            dtype=self.config.dtype,
             device=self.config.experience_buffer_config.device,
             pin_memory=True,
         )
         self.values = TensorCircularBuffer(
             capacity=self.max_size,
-            shape=(),
-            dtype=self.config.dtype,
             device=self.config.experience_buffer_config.device,
             pin_memory=True,
         )
         self.advantages = TensorCircularBuffer(
             capacity=self.max_size,
-            shape=(),
-            dtype=self.config.dtype,
             device=self.config.experience_buffer_config.device,
             pin_memory=True,
         )

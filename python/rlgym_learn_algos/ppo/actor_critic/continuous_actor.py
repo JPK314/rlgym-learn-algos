@@ -201,11 +201,14 @@ class ContinuousActor(Actor[AgentID, np.ndarray, np.ndarray]):
         return log_prob
 
     def get_output(
-        self, obs_list: Sequence[np.ndarray]
+        self, obs_list: Sequence[np.ndarray] | torch.Tensor
     ) -> tuple[torch.Tensor, torch.Tensor]:
-        obs = torch.as_tensor(
-            np.asarray(obs_list), dtype=self.dtype, device=self.device
-        )
+        if isinstance(obs_list, torch.Tensor):
+            obs = obs_list
+        else:
+            obs = torch.as_tensor(
+                np.asarray(obs_list), dtype=self.dtype, device=self.device
+            )
         trunk_output = self.trunk(obs)
         return self.mean_head(trunk_output), self.std_head(trunk_output)
 
@@ -213,7 +216,7 @@ class ContinuousActor(Actor[AgentID, np.ndarray, np.ndarray]):
     def get_actions(
         self,
         agent_id_list: Sequence[AgentID],
-        obs_list: Sequence[np.ndarray],
+        obs_list: Sequence[np.ndarray] | torch.Tensor,
         **kwargs: dict[str, Any],
     ) -> tuple[Iterable[np.ndarray], torch.Tensor]:
         # This should work for both inputs of the form (B, input_shape) and inputs of the form (input_shape,)
@@ -241,13 +244,18 @@ class ContinuousActor(Actor[AgentID, np.ndarray, np.ndarray]):
     def get_backprop_data(
         self,
         agent_id_list: Sequence[AgentID],
-        obs_list: Sequence[np.ndarray],
-        action_list: Sequence[np.ndarray],
+        obs_list: Sequence[np.ndarray] | torch.Tensor,
+        action_list: Sequence[np.ndarray] | torch.Tensor,
         **kwargs: dict[str, Any],
     ):
         mean, std = self.get_output(obs_list)
 
-        actions_tensor = torch.as_tensor(np.asarray(action_list), device=self.device)
+        if isinstance(action_list, torch.Tensor):
+            actions_tensor = action_list
+        else:
+            actions_tensor = torch.as_tensor(
+                np.asarray(action_list), dtype=self.dtype, device=self.device
+            )
 
         log_probs = self.logpdf(mean, std, action=actions_tensor)
         # No analytical form for entropy, just approximate by sampling from distribution. Not using actions_tensor because that may not be in distribution anymore
