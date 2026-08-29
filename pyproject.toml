@@ -4,7 +4,7 @@ build-backend = "maturin"
 
 [project]
 name = "rlgym-learn-algos"
-requires-python = ">=3.8,<3.13"
+requires-python = ">=3.10,<=3.14"
 authors = [
     { name = "Jonathan Keegan" }
 ]
@@ -20,7 +20,7 @@ dependencies = [
     "torch>1.13",
     "typing_extensions>4.6",
     "rlgym>=2.0.0",
-    "rlgym-learn>=0.1.7",
+    "rlgym-learn>=2.0.0",
 ]
 keywords=[
     "rocket-league",
@@ -37,7 +37,19 @@ Repository = "https://github.com/JPK314/rlgym-learn-algos.git"
 Issues = "https://github.com/JPK314/rlgym-learn-algos/issues"
 
 [project.optional-dependencies]
-wandb = ["wandb>0.15"]
+wandb = [
+    "wandb>0.15",
+]
 
 [tool.maturin]
-features = ["pyo3/extension-module"]
+python-source = "python"
+module-name = "rlgym_learn_algos._rlgym_learn_algos"
+bindings = 'pyo3'
+
+[tool.basedpyright]
+reportExplicitAny = false
+reportAny = false
+pythonVersion = "3.10"
+
+[tool.uv.sources]
+rlgym-learn = { path = "../rlgym-learn", editable = true }
