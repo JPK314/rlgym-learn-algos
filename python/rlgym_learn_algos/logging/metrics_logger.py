@@ -36,7 +36,7 @@ class DerivedMetricsLoggerConfig(
         ActionSpaceType,
     ]
 ):
-    controller_name: str | None
+    agent_controller_name: str | None
     derived_agent_controller_config: DerivedAgentControllerConfig[
         AgentControllerConfig,
         AgentID,
@@ -51,7 +51,6 @@ class DerivedMetricsLoggerConfig(
     checkpoint_load_folder: str | None = None
 
 
-# TODO: update docs
 class MetricsLogger(
     ABC,
     Generic[
@@ -68,13 +67,9 @@ class MetricsLogger(
     ],
 ):
     """
-    This class is designed to be used inside an agent controller to handle the processing of state metrics and agent controller data, and to have some side effects resulting from said processing. It supports config-based saving and loading, and nesting with other MetricsLogger subclasses' config-based saving and loading via the AdditionalDerivedConfig.
+    This class is designed to be used inside an agent controller to handle the processing of shared info metrics and agent controller data, and to have some side effects resulting from said processing. It supports config-based saving and loading, and nesting with other MetricsLogger subclasses' config-based saving and loading via DerivedAgentControllerConfig.
 
     MetricsLoggerConfig is the (pydantic) config model for the class, or None if no config is needed.
-
-    MetricsLoggerAdditionalConfig is a dataclass that can include arbitrary data (usually from other config models). It is the responsibility of the agent controller to instantiate this if it's needed.
-
-    StateMetrics is the type used for collection of data from the environment processes.
 
     AgentControllerData is the type used for collection of data from the agent controller containing this metrics logger.
     """

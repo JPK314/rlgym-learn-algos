@@ -64,7 +64,7 @@ class DictMetricsLogger(
     ],
 ):
     """
-    This is a specification of the MetricsLogger which provides an additional method get_metrics to retrieve the metrics as a dictionary.
+    This is a specification of the MetricsLogger which provides an additional method get_metrics to retrieve the metrics as a dictionary and report the dictionary via printing.
     """
 
     @abstractmethod

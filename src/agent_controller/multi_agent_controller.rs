@@ -42,17 +42,6 @@ fn choose_env_actions<'py>(
         .extract()
 }
 
-fn process_env_actions<'py>(
-    agent_subcontroller: &Bound<'py, PyAny>,
-    env_actions: &Bound<'py, PyDict>,
-) -> PyResult<()> {
-    agent_subcontroller.call_method1(
-        intern!(agent_subcontroller.py(), "process_env_actions"),
-        (env_actions,),
-    )?;
-    Ok(())
-}
-
 fn step_env_action<'py>(
     py: Python<'py>,
     action_list: Vec<Bound<'py, PyAny>>,
@@ -178,6 +167,9 @@ impl MultiAgentController {
         for (subcontroller, subcontroller_env_obs_idx_dict) in
             subcontrollers_env_obs_idx_dict.into_iter()
         {
+            if subcontroller_env_obs_idx_dict.is_empty() {
+                continue;
+            }
             let (subcontroller_env_obs_data_dict, mut subcontroller_env_idx_dict) =
                 subcontroller_env_obs_idx_dict
                     .into_iter()
@@ -242,7 +234,7 @@ impl MultiAgentController {
         let py_multi_agent_controller = self.py_multi_agent_controller.bind(py);
         let (n_new_envs, env_action_responses) =
             choose_env_actions(py, py_multi_agent_controller, &env_state_info_dict)?;
-        // TODO: Once deferring env actions is implemented, remove len check
+
         if env_action_responses.len() != env_state_info_dict.len() {
             return Err(PyAssertionError::new_err("Returned dict from choose_env_actions does not contain env action choices for all environments included in env_state_info_dict"));
         }
@@ -313,11 +305,6 @@ impl MultiAgentController {
                     step_env_action(py, action_list, shared_info_setter_option, send_state)?,
                 )?;
             }
-        }
-
-        for py_agent_subcontroller in self.agent_subcontrollers.values() {
-            let agent_subcontroller = py_agent_subcontroller.bind(py);
-            process_env_actions(agent_subcontroller, &env_actions)?;
         }
 
         Ok((n_new_envs, env_actions))

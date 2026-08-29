@@ -24,6 +24,7 @@ class DerivedTrajectoryProcessorConfig(Generic[TrajectoryProcessorConfig]):
     agent_controller_name: str
     dtype: dtype
     device: device
+    seed: int
     checkpoint_load_folder: str | None = None
 
 

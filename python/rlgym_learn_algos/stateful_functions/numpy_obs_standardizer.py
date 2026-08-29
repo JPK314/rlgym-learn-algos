@@ -39,5 +39,6 @@ class NumpyObsStandardizer(ObsStandardizer[AgentID, np.ndarray]):
             )
             for sample in stats_update_batch:
                 self.obs_stats.update(sample)
+            self.steps += 1
         obs_arr_standardized = (obs_arr - self.obs_stats.mean) / self.obs_stats.std
         return [obs for obs in obs_arr_standardized]

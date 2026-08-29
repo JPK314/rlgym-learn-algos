@@ -1,17 +1,26 @@
 import os
 import pickle
+import zipfile
 from collections.abc import Generator, Sequence
 from dataclasses import dataclass
+from io import BytesIO
 from typing import Any, Generic, cast
 
 import numpy as np
 import torch
 from numpy.typing import NDArray
 from pydantic import BaseModel, Field, ValidationInfo, model_validator
-from rlgym.api import ActionType, AgentID, ObsType, RewardType
+from rlgym.api import (
+    ActionSpaceType,
+    ActionType,
+    AgentID,
+    ObsSpaceType,
+    ObsType,
+    RewardType,
+)
 
-from rlgym_learn_algos.util.torch_pydantic import PydanticTorchDevice
-
+from ..util.circular_buffers import TensorCircularBuffer
+from ..util.torch_pydantic import PydanticTorchDevice
 from .trajectory import Trajectory
 from .trajectory_processor import (
     DerivedTrajectoryProcessorConfig,
@@ -20,10 +29,9 @@ from .trajectory_processor import (
     TrajectoryProcessorData,
 )
 
-EXPERIENCE_BUFFER_FILE = "experience_buffer.pkl"
+EXPERIENCE_BUFFER_FILE = "experience_buffer.zip"
 
 
-# TODO: why is device even here?
 class ExperienceBufferConfigModel(
     BaseModel, Generic[TrajectoryProcessorConfig], extra="forbid"
 ):
@@ -40,6 +48,8 @@ class ExperienceBufferConfigModel(
         experience_buffer: (
             ExperienceBuffer[
                 TrajectoryProcessorConfig,
+                Any,
+                Any,
                 Any,
                 Any,
                 Any,
@@ -76,12 +86,15 @@ class ExperienceBufferConfigModel(
 
 
 @dataclass
-class DerivedExperienceBufferConfig(Generic[TrajectoryProcessorConfig]):
+class DerivedExperienceBufferConfig(
+    Generic[TrajectoryProcessorConfig, ObsSpaceType, ActionSpaceType]
+):
     experience_buffer_config: ExperienceBufferConfigModel[TrajectoryProcessorConfig]
     agent_controller_name: str
+    obs_space: ObsSpaceType
+    action_space: ActionSpaceType
     seed: int
     dtype: torch.dtype
-    learner_device: torch.device
     checkpoint_load_folder: str | None = None
 
 
@@ -92,33 +105,11 @@ class ExperienceBuffer(
         ObsType,
         ActionType,
         RewardType,
+        ObsSpaceType,
+        ActionSpaceType,
         TrajectoryProcessorData,
     ]
 ):
-    @staticmethod
-    def _cat(t1: torch.Tensor, t2: torch.Tensor, size: int):
-        t2_len = len(t2)
-        if t2_len > size:
-            # t2 alone is larger than we want; copy the end
-            # This clone is needed to avoid nesting views
-            t = t2[-size:].clone()
-
-        elif t2_len == size:
-            # t2 is a perfect match; just use it directly
-            t = t2
-
-        elif len(t1) + t2_len > size:
-            # t1+t2 is larger than we want; use t2 wholly with the end of t1 before it
-            t = torch.cat((t1[t2_len - size :], t2), 0)
-
-        else:
-            # t1+t2 does not exceed what we want; concatenate directly
-            t = torch.cat((t1, t2), 0)
-
-        del t1
-        del t2
-        return t
-
     @staticmethod
     def _cat_list(cur: list[Any], new: list[Any], size: int):
         new_len = len(new)
@@ -154,14 +145,21 @@ class ExperienceBuffer(
         self.agent_ids: list[AgentID] = []
         self.observations: list[ObsType] = []
         self.actions: list[ActionType] = []
-        self.log_probs: torch.Tensor = torch.FloatTensor()
-        self.values: torch.Tensor = torch.FloatTensor()
-        self.advantages: torch.Tensor = torch.FloatTensor()
+        self.log_probs: TensorCircularBuffer
+        self.values: TensorCircularBuffer
+        self.advantages: TensorCircularBuffer
         self.rng: np.random.RandomState = np.random.RandomState(0)
         self.max_size: int
-        self.config: DerivedExperienceBufferConfig[TrajectoryProcessorConfig]
+        self.config: DerivedExperienceBufferConfig[
+            TrajectoryProcessorConfig, ObsSpaceType, ActionSpaceType
+        ]
 
-    def load(self, config: DerivedExperienceBufferConfig[TrajectoryProcessorConfig]):
+    def load(
+        self,
+        config: DerivedExperienceBufferConfig[
+            TrajectoryProcessorConfig, ObsSpaceType, ActionSpaceType
+        ],
+    ):
         self.config = config
         self.max_size = config.experience_buffer_config.max_size
         self.rng = np.random.RandomState(config.seed)
@@ -169,84 +167,129 @@ class ExperienceBuffer(
             DerivedTrajectoryProcessorConfig(
                 trajectory_processor_config=config.experience_buffer_config.trajectory_processor_config,
                 agent_controller_name=config.agent_controller_name,
+                seed=config.seed,
                 dtype=config.dtype,
-                device=config.learner_device,
+                device=config.experience_buffer_config.device,
             )
         )
-        self.log_probs = torch.tensor([], dtype=config.dtype)
-        self.values = torch.tensor([], dtype=config.dtype)
-        self.advantages = torch.tensor([], dtype=config.dtype)
+        self.log_probs = TensorCircularBuffer(
+            capacity=self.max_size,
+            device=config.experience_buffer_config.device,
+            pin_memory=True,
+        )
+        self.values = TensorCircularBuffer(
+            capacity=self.max_size,
+            device=config.experience_buffer_config.device,
+            pin_memory=True,
+        )
+        self.advantages = TensorCircularBuffer(
+            capacity=self.max_size,
+            device=config.experience_buffer_config.device,
+            pin_memory=True,
+        )
         if self.config.checkpoint_load_folder is not None:
             self._load_from_checkpoint()
-        self.log_probs = self.log_probs.to(config.learner_device)
-        self.values = self.values.to(config.learner_device)
-        self.advantages = self.advantages.to(config.learner_device)
 
     def _load_from_checkpoint(self):
         assert self.config.checkpoint_load_folder is not None, (
             "Cannot load from checkpoint if checkpoint load folder is None!"
         )
-        # lazy way
-        # TODO: don't use pickle for torch things, use torch.load because of map_location. Or maybe define a custom unpickler for this? Or maybe one already exists?
         try:
-            with open(
+            with zipfile.ZipFile(
                 os.path.join(
                     self.config.checkpoint_load_folder, EXPERIENCE_BUFFER_FILE
                 ),
-                "rb",
-            ) as f:
-                state_dict = pickle.load(f)
-            self.agent_ids = state_dict["agent_ids"]
-            self.observations = state_dict["observations"]
-            self.actions = state_dict["actions"]
-            self.log_probs = state_dict["log_probs"]
-            self.values = state_dict["values"]
-            self.advantages = state_dict["advantages"]
+                "r",
+            ) as z:
+                self.agent_ids = self._load_list_from_zip(z, "agent_ids.pkl")
+                self.observations = self._load_list_from_zip(z, "observations.pkl")
+                self.actions = self._load_list_from_zip(z, "actions.pkl")
+                self.log_probs = self._load_tensor_buffer_from_zip(z, "log_probs.pt")
+                self.values = self._load_tensor_buffer_from_zip(z, "values.pt")
+                self.advantages = self._load_tensor_buffer_from_zip(z, "advantages.pt")
         except FileNotFoundError:
             print(
                 f"{self.config.agent_controller_name}: Tried to load experience buffer from checkpoint using the file at location {os.path.join(self.config.checkpoint_load_folder, EXPERIENCE_BUFFER_FILE)}, but there is no such file! A blank experience buffer will be used instead."
             )
 
+    def _load_list_from_zip(self, z: zipfile.ZipFile, filename: str) -> list[Any]:
+        loaded_data = pickle.loads(z.read(filename))
+        loaded_len = len(loaded_data)
+        if loaded_len > self.config.experience_buffer_config.max_size:
+            print(
+                f"{self.config.agent_controller_name}: Experience buffer checkpoint length for {filename} was {loaded_len}, but the configured capacity is {self.config.experience_buffer_config.max_size}. The newest samples that fit will be retained."
+            )
+            ret_list = loaded_data[-self.config.experience_buffer_config.max_size :]
+        else:
+            ret_list = loaded_data
+        return ret_list
+
+    def _load_tensor_buffer_from_zip(
+        self,
+        z: zipfile.ZipFile,
+        filename: str,
+    ) -> TensorCircularBuffer:
+        tensor_buffer = TensorCircularBuffer(
+            capacity=self.config.experience_buffer_config.max_size,
+            device=self.config.experience_buffer_config.device,
+            pin_memory=True,
+        )
+        if filename in z.namelist():
+            state = torch.load(
+                BytesIO(z.read(filename)),
+                map_location=self.config.experience_buffer_config.device,
+                weights_only=True,
+            )
+            loaded_data: torch.Tensor = state["data"].to(self.config.dtype)
+            loaded_capacity: int = state["capacity"]
+            if loaded_capacity != self.config.experience_buffer_config.max_size:
+                print(
+                    f"{self.config.agent_controller_name}: Experience buffer checkpoint capacity for {filename} was {loaded_capacity}, but the configured capacity is {self.config.experience_buffer_config.max_size}. The newest samples that fit will be retained."
+                )
+            tensor_buffer.append(loaded_data)
+        return tensor_buffer
+
+    @staticmethod
+    def _save_tensor_buffer_to_zip(
+        z: zipfile.ZipFile, filename: str, v: TensorCircularBuffer
+    ):
+        t = v.tensor()
+        if t is not None:
+            buf = BytesIO()
+            torch.save({"capacity": v.capacity, "data": t.detach().cpu()}, buf)
+            z.writestr(filename, buf.getvalue())
+
     def save_checkpoint(self, folder_path: str | os.PathLike[str]):
         os.makedirs(folder_path, exist_ok=True)
         if self.config.experience_buffer_config.save_experience_buffer_in_checkpoint:
-            with open(
+            with zipfile.ZipFile(
                 os.path.join(folder_path, EXPERIENCE_BUFFER_FILE),
-                "wb",
-            ) as f:
-                pickle.dump(
-                    {
-                        "agent_ids": self.agent_ids,
-                        "observations": self.observations,
-                        "actions": self.actions,
-                        "log_probs": self.log_probs,
-                        "values": self.values,
-                        "advantages": self.advantages,
-                    },
-                    f,
+                "w",
+                compression=zipfile.ZIP_DEFLATED,
+            ) as z:
+                z.writestr("agent_ids.pkl", pickle.dumps(self.agent_ids))
+                z.writestr("observations.pkl", pickle.dumps(self.observations))
+                z.writestr("actions.pkl", pickle.dumps(self.actions))
+                ExperienceBuffer._save_tensor_buffer_to_zip(
+                    z, "log_probs.pt", self.log_probs
+                )
+                ExperienceBuffer._save_tensor_buffer_to_zip(z, "values.pt", self.values)
+                ExperienceBuffer._save_tensor_buffer_to_zip(
+                    z, "advantages.pt", self.advantages
                 )
         self.trajectory_processor.save_checkpoint(folder_path)
 
-    # TODO: update docs
     def submit_experience(
         self, trajectories: list[Trajectory[AgentID, ObsType, ActionType, RewardType]]
     ) -> TrajectoryProcessorData:
         """
         Function to add experience to the buffer.
 
-        :param observations: An ordered sequence of observations from the environment.
-        :param actions: The corresponding actions that were taken at each state in the `states` sequence.
-        :param log_probs: The log probability for each action in `actions`
-        :param rewards: A list of rewards such that rewards[i] is the reward for taking action actions[i] from observation observations[i]
-        :param terminateds: An ordered sequence of the terminated flags from the environment.
-        :param truncateds: An ordered sequence of the truncated flag from the environment.
-        :param values: The output of the value function estimator evaluated on the observations.
-        :param advantages: The advantage of each action at each state in `states` and `actions`
+        :param trajectories: A list of Trajectory instances to process and store as experience in the buffer.
 
-        :return: TrajectoryProcessorData
+        :return: TrajectoryProcessorData - statistics intended for consumption by the caller (likely in a metrics logger) from the trajectory processor.
         """
 
-        _cat = ExperienceBuffer._cat
         _cat_list = ExperienceBuffer._cat_list
         exp_buffer_data, trajectory_processor_data = (
             self.trajectory_processor.process_trajectories(trajectories)
@@ -262,25 +305,12 @@ class ExperienceBuffer(
             self.max_size,
         )
         self.actions = _cat_list(self.actions, actions, self.max_size)
-        self.log_probs = _cat(
-            self.log_probs,
-            log_probs,
-            self.max_size,
-        )
-        self.values = _cat(
-            self.values,
-            values,
-            self.max_size,
-        )
-        self.advantages = _cat(
-            self.advantages,
-            advantages,
-            self.max_size,
-        )
+        self.log_probs.append(log_probs)
+        self.values.append(values)
+        self.advantages.append(advantages)
 
         return trajectory_processor_data
 
-    # TODO: tensordict?
     def _get_samples(
         self, indices: NDArray[np.int64]
     ) -> tuple[
@@ -292,13 +322,21 @@ class ExperienceBuffer(
         torch.Tensor,
     ]:
         py_indices: list[int] = indices.tolist()
+        log_probs_tensor = self.log_probs.tensor()
+        values_tensor = self.values.tensor()
+        advantages_tensor = self.advantages.tensor()
+        assert (
+            log_probs_tensor is not None
+            and values_tensor is not None
+            and advantages_tensor is not None
+        ), "Cannot get samples of experience buffer before any data has been submitted"
         return (
             [self.agent_ids[index] for index in py_indices],
             [self.observations[index] for index in py_indices],
             [self.actions[index] for index in py_indices],
-            self.log_probs[indices],
-            self.values[indices],
-            self.advantages[indices],
+            log_probs_tensor[indices],
+            values_tensor[indices],
+            advantages_tensor[indices],
         )
 
     def get_all_batches_shuffled(
@@ -321,12 +359,7 @@ class ExperienceBuffer(
         :param batch_size: size of each batch yielded by the generator.
         :return:
         """
-        assert self.config is not None, (
-            "Cannot get batches before calling load with config!"
-        )
-        if self.config.learner_device.type != "cpu":
-            torch.cuda.current_stream().synchronize()
-        total_samples = self.values.shape[0]
+        total_samples = len(self.agent_ids)
         indices = self.rng.permutation(total_samples)
         start_idx = 0
         while start_idx + batch_size <= total_samples:
@@ -338,9 +371,27 @@ class ExperienceBuffer(
         Function to clear the experience buffer.
         :return: None.
         """
+        del self.agent_ids
         del self.observations
         del self.actions
         del self.log_probs
         del self.values
         del self.advantages
-        self.__init__(self.trajectory_processor)
+        self.agent_ids = []
+        self.observations = []
+        self.actions = []
+        self.log_probs = TensorCircularBuffer(
+            capacity=self.max_size,
+            device=self.config.experience_buffer_config.device,
+            pin_memory=True,
+        )
+        self.values = TensorCircularBuffer(
+            capacity=self.max_size,
+            device=self.config.experience_buffer_config.device,
+            pin_memory=True,
+        )
+        self.advantages = TensorCircularBuffer(
+            capacity=self.max_size,
+            device=self.config.experience_buffer_config.device,
+            pin_memory=True,
+        )

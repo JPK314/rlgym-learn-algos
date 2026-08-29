@@ -84,7 +84,7 @@ class MultiAgentControllerConfigModel(
 
                         else:
                             subcontrollers_config[k] = v
-                data_dict["agent_controllers_config"] = subcontrollers_config
+                data_dict["subcontrollers_config"] = subcontrollers_config
             elif isinstance(data_config_model, MultiAgentControllerConfigModel):
                 data_config_model.subcontrollers_config = {
                     k: v

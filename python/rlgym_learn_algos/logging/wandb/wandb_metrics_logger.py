@@ -39,6 +39,8 @@ InnerMetricsLoggerConfig = TypeVar(
     "InnerMetricsLoggerConfig", bound=InstanceOf[BaseModel] | None
 )
 
+INNER_METRICS_LOGGER_FOLDER = "inner_metrics_logger"
+
 
 def convert_nested_dict(d: dict[str, Any]):
     new: dict[str, Any] = {}
@@ -273,10 +275,14 @@ class WandbMetricsLogger(
         )
         self.inner_metrics_logger.load(
             DerivedMetricsLoggerConfig(
-                controller_name=config.controller_name,
+                agent_controller_name=config.agent_controller_name,
                 derived_agent_controller_config=config.derived_agent_controller_config,
                 metrics_logger_config=config.metrics_logger_config.inner_metrics_logger_config,
-                checkpoint_load_folder=config.checkpoint_load_folder,
+                checkpoint_load_folder=None
+                if config.checkpoint_load_folder is None
+                else os.path.join(
+                    config.checkpoint_load_folder, INNER_METRICS_LOGGER_FOLDER
+                ),
             )
         )
         if self.config.checkpoint_load_folder is not None:
@@ -286,10 +292,11 @@ class WandbMetricsLogger(
             self.run_id = None
             return
 
-        if self.run_id is not None and self.config.metrics_logger_config.id is not None:
-            print(
-                f"{config.controller_name}: Wandb run id from checkpoint ({self.run_id}) is being overridden by wandb run id from config: {config.metrics_logger_config.id}"
-            )
+        if self.config.metrics_logger_config.id is not None:
+            if self.run_id is not None:
+                print(
+                    f"{config.agent_controller_name}: Wandb run id from checkpoint ({self.run_id}) is being overridden by wandb run id from config: {config.metrics_logger_config.id}"
+                )
             self.run_id = config.metrics_logger_config.id
 
         wandb_config = {
@@ -300,7 +307,7 @@ class WandbMetricsLogger(
         run_name = config.metrics_logger_config.run
         if config.metrics_logger_config.new_run_with_run_suffix:
             print(
-                f"{config.controller_name}: Due to config, a new wandb run is being created with run suffix. This run will use the project and group specified in config, and will use the run name in config prepended to the run suffix."
+                f"{config.agent_controller_name}: Due to config, a new wandb run is being created with run suffix. This run will use the project and group specified in config, and will use the run name in config prepended to the run suffix."
             )
             if (
                 self.additional_derived_config.run_suffix is not None
@@ -316,12 +323,14 @@ class WandbMetricsLogger(
             config=wandb_config,
             name=run_name,
             id=self.run_id,
-            resume="allow",
+            resume="allow"
+            if not config.metrics_logger_config.new_run_with_run_suffix
+            else "never",
             reinit="create_new",
             settings=wandb.Settings(**config.metrics_logger_config.settings_kwargs),
         )
         self.run_id = self.wandb_run.id
-        print(f"{config.controller_name}: Created wandb run! {self.run_id}")
+        print(f"{config.agent_controller_name}: Created wandb run! {self.run_id}")
 
     def _load_from_checkpoint(self):
         assert self.config is not None, (
@@ -345,7 +354,7 @@ class WandbMetricsLogger(
                 self.run_id = None
         except FileNotFoundError:
             print(
-                f"{self.config.controller_name}: Tried to load wandb run from checkpoint using the file at location {os.path.join(self.config.checkpoint_load_folder, self.checkpoint_file_name)}, but there is no such file! A new run will be created based on the config values instead."
+                f"{self.config.agent_controller_name}: Tried to load wandb run from checkpoint using the file at location {os.path.join(self.config.checkpoint_load_folder, self.checkpoint_file_name)}, but there is no such file! A new run will be created based on the config values instead."
             )
             self.run_id = None
 
@@ -361,3 +370,6 @@ class WandbMetricsLogger(
             "wt",
         ) as f:
             json.dump(state, f, indent=4)
+        self.inner_metrics_logger.save_checkpoint(
+            os.path.join(folder_path, INNER_METRICS_LOGGER_FOLDER)
+        )

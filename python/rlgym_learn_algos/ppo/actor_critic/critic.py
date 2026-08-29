@@ -14,10 +14,10 @@ class Critic(ABC, nn.Module, Generic[AgentID, ObsType]):
     @override
     @abstractmethod
     def forward(
-        self, agent_id_list: Sequence[AgentID], obs_list: Sequence[ObsType]
+        self, agent_id_list: Sequence[AgentID], obs_list: Sequence[ObsType] | Tensor
     ) -> Tensor:
         """
         :param agent_id_list: List of AgentIDs, parallel with obs_list. AgentIDs may not be unique here.
-        :param obs_list: List of ObsTypes to compute values for.
-        :return: Tensor. Must be 0-dimensional for PPO, with dtype float32.
+        :param obs_list: List of ObsTypes to compute values for, or an equivalent tensor.
+        :return: Tensor. Must be 1-dimensional (parallel to obs_list) for PPO, with dtype float32.
         """

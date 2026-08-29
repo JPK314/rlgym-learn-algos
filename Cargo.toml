@@ -16,3 +16,4 @@ pyo3 = { version = "0.29.0", features = ["py-clone"] }
 paste = { package = "pastey", version = "*" }
 itertools = "0.14.0"
 enum-kinds = "0.5.1"
+rand = "0.10.2"
