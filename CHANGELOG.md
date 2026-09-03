@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-09-03
+
+### Changed
+
+- `PPOAgentController` and `PPOLearner` now use `non_blocking=True` only when the learner's device is not CPU in order to avoid strange asynchronous behavior when using CPU-only on Apple silicon.
+- The field `log_prefix` in `PPOLearner` is now private (renamed to `_log_prefix`)
+
 ## [0.4.0] - 2026-08-29
 
 ### Added
