@@ -851,7 +851,8 @@ class PPOAgentController(
         ).flatten()
         # val preds must be on cpu with learner dtype
         val_preds: torch.Tensor = val_preds_on_learner_device.to(
-            device="cpu", non_blocking=True
+            device="cpu",
+            non_blocking=self.learner._non_blocking,  # pyright: ignore [reportPrivateUsage]
         )
         assert (
             val_preds.dtype == self.config.subcontroller_config.learner_config.dtype

@@ -117,7 +117,6 @@ class PPOLearner(
         ] = optimizers_factory
         self.critic_loss_fn: nn.Module = torch.nn.MSELoss()
         self.config: DerivedPPOLearnerConfig[ObsSpaceType, ActionSpaceType]
-        self.log_prefix: str
         self.actor_critic: ActorCritic[AgentID, ObsType, ActionType]
         self.optimizers: list[torch.optim.Optimizer]
         self.cumulative_model_updates: int
@@ -125,6 +124,9 @@ class PPOLearner(
         self.batch_advantages: torch.Tensor
         self.batch_old_probs: torch.Tensor
         self.batch_target_values: torch.Tensor
+
+        self._log_prefix: str
+        self._non_blocking: bool
 
     def load(self, config: DerivedPPOLearnerConfig[ObsSpaceType, ActionSpaceType]):
         self.config = config
@@ -147,11 +149,12 @@ class PPOLearner(
             self.config.learner_config.optimizer_named_parameter_group_kwargs,
             config.agent_controller_name,
         )
-        self.log_prefix = (
+        self._log_prefix = (
             f"{config.agent_controller_name}:"
             if config.agent_controller_name is not None
             else ""
         )
+        self._non_blocking = self.config.learner_config.device.type != "cpu"
 
         self.cumulative_model_updates = 0
 
@@ -204,7 +207,7 @@ class PPOLearner(
         )
 
         assert os.path.exists(self.config.checkpoint_load_folder), (
-            f"{self.log_prefix} PPO Learner cannot find folder: {self.config.checkpoint_load_folder}"
+            f"{self._log_prefix} PPO Learner cannot find folder: {self.config.checkpoint_load_folder}"
         )
 
         _ = self.actor_critic.load_state_dict(
@@ -227,7 +230,7 @@ class PPOLearner(
                 self.cumulative_model_updates = misc_state["cumulative_model_updates"]
         except FileNotFoundError:
             print(
-                f"{self.log_prefix} Tried to load the PPO learner's misc state from the file at location {os.path.join(self.config.checkpoint_load_folder, MISC_STATE)}, but there is no such file! Miscellaneous stats will be initialized as if this were a new run instead."
+                f"{self._log_prefix} Tried to load the PPO learner's misc state from the file at location {os.path.join(self.config.checkpoint_load_folder, MISC_STATE)}, but there is no such file! Miscellaneous stats will be initialized as if this were a new run instead."
             )
             self.cumulative_model_updates = 0
 
@@ -292,9 +295,15 @@ class PPOLearner(
                     _batch_advantages,
                 ) = batch
 
-                _ = self.batch_old_probs.copy_(_batch_old_probs, non_blocking=True)
-                _ = self.batch_target_values.copy_(_batch_values, non_blocking=True)
-                _ = self.batch_advantages.copy_(_batch_advantages, non_blocking=True)
+                _ = self.batch_old_probs.copy_(
+                    _batch_old_probs, non_blocking=self._non_blocking
+                )
+                _ = self.batch_target_values.copy_(
+                    _batch_values, non_blocking=self._non_blocking
+                )
+                _ = self.batch_advantages.copy_(
+                    _batch_advantages, non_blocking=self._non_blocking
+                )
                 _ = self.batch_target_values.add_(self.batch_advantages)
 
                 if self.config.learner_config.advantage_standardization:
@@ -352,7 +361,7 @@ class PPOLearner(
                                 torch.abs(ratio - 1)
                                 > self.config.learner_config.clip_range
                             ).float()
-                        ).to(device="cpu", non_blocking=True)
+                        ).to(device="cpu", non_blocking=self._non_blocking)
                         clip_fractions.append((clip_fraction, minibatch_ratio))
 
                     actor_loss = (
@@ -370,11 +379,17 @@ class PPOLearner(
                     total_loss.backward()  # pyright: ignore [reportUnknownMemberType, reportUnusedCallResult]
 
                     val_losses.append(
-                        value_loss.to(device="cpu", non_blocking=True).detach()
+                        value_loss.to(
+                            device="cpu", non_blocking=self._non_blocking
+                        ).detach()
                     )
-                    divergences.append(kl.to(device="cpu", non_blocking=True).detach())
+                    divergences.append(
+                        kl.to(device="cpu", non_blocking=self._non_blocking).detach()
+                    )
                     entropies.append(
-                        entropy.to(device="cpu", non_blocking=True).detach()
+                        entropy.to(
+                            device="cpu", non_blocking=self._non_blocking
+                        ).detach()
                     )
 
                 if self.config.learner_config.max_grad_norm is not None:
