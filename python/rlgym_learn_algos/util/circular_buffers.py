@@ -8,16 +8,20 @@ class TensorCircularBuffer:
         capacity: int,
         device: torch.device,
         pin_memory: bool,
+        forced_dtype: torch.dtype | None,
     ):
         assert capacity > 0, "Capacity must be a positive integer"
         self.storage: torch.Tensor | None = None
         self.capacity: int = capacity
         self.device: torch.device = device
         self.pin_memory: bool = pin_memory
+        self.forced_dtype: torch.dtype | None = forced_dtype
         self.length: int = 0
         self.write_pos: int = 0
 
     def append(self, t: torch.Tensor):
+        if self.forced_dtype is not None:
+            t = t.to(dtype=self.forced_dtype)
         if self.storage is None:
             self.storage = torch.empty(
                 (2 * self.capacity, *tuple(t.shape[1:])),
@@ -71,17 +75,17 @@ class TensorCircularBuffer:
 
 
 class NumpyCircularBuffer:
-    def __init__(
-        self,
-        capacity: int,
-    ):
+    def __init__(self, capacity: int, forced_dtype: np.dtype | None):
         assert capacity > 0, "Capacity must be a positive integer"
         self.storage: np.ndarray | None = None
         self.capacity: int = capacity
+        self.forced_dtype: np.dtype | None = forced_dtype
         self.length: int = 0
         self.write_pos: int = 0
 
     def append(self, arr: np.ndarray):
+        if self.forced_dtype is not None:
+            arr = arr.astype(self.forced_dtype)
         if self.storage is None:
             self.storage = np.empty(
                 (2 * self.capacity, *arr.shape[1:]),

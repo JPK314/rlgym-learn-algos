@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.2] - 2026-09-05
+
+### Changed
+
+- `NumpyExperienceBuffer` now properly loads checkpoints.
+- The `dtype` field in `PPOLearnerConfigModel` is now used by `NumpyExperienceBuffer` to force the dtype used to store observations in the experience buffer, overwriting whatever dtype came from the environment.
+
 ## [0.4.1] - 2026-09-03
 
 ### Changed

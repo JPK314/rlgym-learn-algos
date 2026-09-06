@@ -14,6 +14,7 @@ from rlgym.api import ActionSpaceType, AgentID, ObsSpaceType, RewardType
 from typing_extensions import override
 
 from ..util.circular_buffers import NumpyCircularBuffer, TensorCircularBuffer
+from ..util.torch_utils import torch_to_numpy_dtype
 from .experience_buffer import (
     EXPERIENCE_BUFFER_FILE,
     DerivedExperienceBufferConfig,
@@ -72,13 +73,14 @@ class NumpyExperienceBuffer(
             TrajectoryProcessorConfig, ObsSpaceType, ActionSpaceType
         ],
     ):
-        super().load(config)
         self.observations = NumpyCircularBuffer(
-            capacity=self.max_size,
+            capacity=config.experience_buffer_config.max_size,
+            forced_dtype=torch_to_numpy_dtype(config.dtype),
         )
         self.actions = NumpyCircularBuffer(
-            capacity=self.max_size,
+            capacity=config.experience_buffer_config.max_size, forced_dtype=None
         )
+        super().load(config)
 
     @override
     def _load_from_checkpoint(self):
@@ -96,7 +98,9 @@ class NumpyExperienceBuffer(
                 self.observations = self._load_numpy_buffer_from_zip(
                     z, "observations.npy"
                 )
-                self.actions = self._load_numpy_buffer_from_zip(z, "actions.npy")
+                self.actions = self._load_numpy_buffer_from_zip(
+                    z, "actions.npy", convert_dtype=False
+                )
                 self.log_probs = self._load_tensor_buffer_from_zip(z, "log_probs.pt")
                 self.values = self._load_tensor_buffer_from_zip(z, "values.pt")
                 self.advantages = self._load_tensor_buffer_from_zip(z, "advantages.pt")
@@ -106,15 +110,16 @@ class NumpyExperienceBuffer(
             )
 
     def _load_numpy_buffer_from_zip(
-        self, z: zipfile.ZipFile, filename: str
+        self, z: zipfile.ZipFile, filename: str, convert_dtype: bool = True
     ) -> NumpyCircularBuffer:
         numpy_buffer = NumpyCircularBuffer(
             capacity=self.config.experience_buffer_config.max_size,
+            forced_dtype=torch_to_numpy_dtype(self.config.dtype)
+            if convert_dtype
+            else None,
         )
         if filename in z.namelist():
-            loaded_data = np.load(BytesIO(z.read(filename)), allow_pickle=False).astype(
-                self.config.dtype
-            )
+            loaded_data = np.load(BytesIO(z.read(filename)), allow_pickle=False)
             numpy_buffer.append(loaded_data)
         return numpy_buffer
 
@@ -258,23 +263,24 @@ class NumpyExperienceBuffer(
         del self.advantages
         self.agent_ids = []
         self.observations = NumpyCircularBuffer(
-            capacity=self.max_size,
+            capacity=self.max_size, forced_dtype=torch_to_numpy_dtype(self.config.dtype)
         )
-        self.actions = NumpyCircularBuffer(
-            capacity=self.max_size,
-        )
+        self.actions = NumpyCircularBuffer(capacity=self.max_size, forced_dtype=None)
         self.log_probs = TensorCircularBuffer(
             capacity=self.max_size,
             device=self.config.experience_buffer_config.device,
             pin_memory=True,
+            forced_dtype=self.config.dtype,
         )
         self.values = TensorCircularBuffer(
             capacity=self.max_size,
             device=self.config.experience_buffer_config.device,
             pin_memory=True,
+            forced_dtype=self.config.dtype,
         )
         self.advantages = TensorCircularBuffer(
             capacity=self.max_size,
             device=self.config.experience_buffer_config.device,
             pin_memory=True,
+            forced_dtype=self.config.dtype,
         )

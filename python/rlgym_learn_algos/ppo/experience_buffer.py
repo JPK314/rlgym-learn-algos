@@ -176,16 +176,19 @@ class ExperienceBuffer(
             capacity=self.max_size,
             device=config.experience_buffer_config.device,
             pin_memory=True,
+            forced_dtype=config.dtype,
         )
         self.values = TensorCircularBuffer(
             capacity=self.max_size,
             device=config.experience_buffer_config.device,
             pin_memory=True,
+            forced_dtype=config.dtype,
         )
         self.advantages = TensorCircularBuffer(
             capacity=self.max_size,
             device=config.experience_buffer_config.device,
             pin_memory=True,
+            forced_dtype=config.dtype,
         )
         if self.config.checkpoint_load_folder is not None:
             self._load_from_checkpoint()
@@ -225,14 +228,13 @@ class ExperienceBuffer(
         return ret_list
 
     def _load_tensor_buffer_from_zip(
-        self,
-        z: zipfile.ZipFile,
-        filename: str,
+        self, z: zipfile.ZipFile, filename: str, convert_dtype: bool = True
     ) -> TensorCircularBuffer:
         tensor_buffer = TensorCircularBuffer(
             capacity=self.config.experience_buffer_config.max_size,
             device=self.config.experience_buffer_config.device,
             pin_memory=True,
+            forced_dtype=self.config.dtype if convert_dtype else None,
         )
         if filename in z.namelist():
             state = torch.load(
@@ -240,11 +242,15 @@ class ExperienceBuffer(
                 map_location=self.config.experience_buffer_config.device,
                 weights_only=True,
             )
-            loaded_data: torch.Tensor = state["data"].to(self.config.dtype)
+            loaded_data: torch.Tensor = state["data"]
             loaded_capacity: int = state["capacity"]
             if loaded_capacity != self.config.experience_buffer_config.max_size:
                 print(
                     f"{self.config.agent_controller_name}: Experience buffer checkpoint capacity for {filename} was {loaded_capacity}, but the configured capacity is {self.config.experience_buffer_config.max_size}. The newest samples that fit will be retained."
+                )
+            if loaded_data.dtype != self.config.dtype:
+                print(
+                    f"{self.config.agent_controller_name}: Experience buffer checkpoint dtype for {filename} was {loaded_data.dtype}, but the configured dtype is {self.config.dtype}. The data in the checkpoint will be converted to the configured dtype."
                 )
             tensor_buffer.append(loaded_data)
         return tensor_buffer
@@ -384,14 +390,17 @@ class ExperienceBuffer(
             capacity=self.max_size,
             device=self.config.experience_buffer_config.device,
             pin_memory=True,
+            forced_dtype=self.config.dtype,
         )
         self.values = TensorCircularBuffer(
             capacity=self.max_size,
             device=self.config.experience_buffer_config.device,
             pin_memory=True,
+            forced_dtype=self.config.dtype,
         )
         self.advantages = TensorCircularBuffer(
             capacity=self.max_size,
             device=self.config.experience_buffer_config.device,
             pin_memory=True,
+            forced_dtype=self.config.dtype,
         )
