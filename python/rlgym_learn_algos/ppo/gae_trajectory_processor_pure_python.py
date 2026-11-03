@@ -199,6 +199,7 @@ class GAETrajectoryProcessorPurePython(
         self,
         config: DerivedTrajectoryProcessorConfig[GAETrajectoryProcessorConfigModel],
     ):
+        self.config = config
         random.seed(config.seed)
         self.gamma = config.trajectory_processor_config.gamma
         self.lmbda = config.trajectory_processor_config.lmbda
